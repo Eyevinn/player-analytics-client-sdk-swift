@@ -5,10 +5,17 @@ import AVFoundation
 
 internal final class AnalyticsEventSender {
     private let sessionId = UUID().uuidString
+    private let eventSink: EventSinkPlayerLogger
+
+    public var lastError: Error? = nil
 
     /// A computed property to retrieve the current time in milliseconds.
     private var currentTimestamp: Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
+    }
+
+    public init(logger eventSink : EventSinkPlayerLogger) {
+        self.eventSink = eventSink
     }
 
     func sendEvent(eventType: String,
@@ -126,7 +133,7 @@ internal final class AnalyticsEventSender {
     }
 
     private func sendToEventSink(event: [String: Any]) {
-        // Forward the event to your analytics server or pipeline.
-        print("******* Forwarding event to event sink: \(event)")
+
+        eventSink.log(event)
     }
 }

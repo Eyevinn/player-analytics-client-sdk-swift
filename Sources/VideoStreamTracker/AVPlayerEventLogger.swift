@@ -4,8 +4,6 @@ import AVFoundation
 
 public final class AVPlayerEventLogger: NSObject {
 
-    private var internalState = PlayerEvent.initEvent
-
     // Internal enum to list events. (No need to expose to the app.)
     enum PlayerEvent: CustomStringConvertible {
         case initEvent
@@ -63,8 +61,7 @@ public final class AVPlayerEventLogger: NSObject {
     // MARK: - Properties
 
     private let player: AVPlayer
-    private let logger: Logger
-    private let analytics = AnalyticsEventSender()  // Added analytics sender
+    private let analytics: AnalyticsEventSender  // Added analytics sender
 
     // Observers & Notifications
     private var timeControlStatusObservation: NSKeyValueObservation?
@@ -101,9 +98,9 @@ public final class AVPlayerEventLogger: NSObject {
     /// - Parameters:
     ///   - player: The AVPlayer whose events will be tracked.
     ///   - logger: A logger conforming to Logger (e.g. ConsoleLogger, FileLogger).
-    public init(player: AVPlayer, logger: Logger = ConsoleLogger()) {
+    public init(player: AVPlayer, eventSinkUrl url: URL) {
         self.player = player
-        self.logger = logger
+        self.analytics = AnalyticsEventSender(logger: EventSinkPlayerLogger(endpoint: url))
         super.init()
         // Log init event as soon as logger is created.
         log(.initEvent)
@@ -227,8 +224,6 @@ public final class AVPlayerEventLogger: NSObject {
     // MARK: - Logging Helpers
 
     private func log(_ event: PlayerEvent) {
-        // Log human readable event.
-        logger.log(event.description)
         // Also send analytics events.
         sendAnalytics(for: event)
     }
