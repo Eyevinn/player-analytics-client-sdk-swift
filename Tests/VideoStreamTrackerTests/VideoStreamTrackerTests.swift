@@ -5,7 +5,7 @@ import AVKit
 final class VideoStreamTrackerTests: XCTestCase {
     func testInitialization() throws {
         let player = AVPlayer()
-        let tracker = VideoStreamTracker(player: player)
+        let tracker = AVPlayerEventLogger(player: player)
         XCTAssertNotNil(tracker)
     }
 }
