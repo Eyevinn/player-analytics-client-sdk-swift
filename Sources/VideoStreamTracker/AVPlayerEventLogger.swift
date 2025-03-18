@@ -1,0 +1,314 @@
+import Foundation
+import AVFoundation
+
+// MARK: - Logger Protocol
+
+/// A protocol that defines a logger to which AVPlayer events are sent.
+public protocol Logger: Sendable {
+    func log(_ message: String)
+}
+
+/// A simple console logger for debugging purposes.
+public struct ConsoleLogger: Logger {
+    public init() {}
+    public func log(_ message: String) {
+        print("[AVPlayerEventLogger] \(message)")
+    }
+}
+
+/// You could create a FileLogger that writes to disk by conforming to Logger.
+// public struct FileLogger: Logger {
+//    // Implementation that writes log messages to a file.
+// }
+
+
+// MARK: - AVPlayerEventLogger
+
+public final class AVPlayerEventLogger: NSObject {
+
+    // Internal enum to list events. (No need to expose to the app.)
+    enum PlayerEvent: CustomStringConvertible {
+        case initEvent
+        case loading
+        case loaded
+        case playing
+        case paused
+        case stopped
+        case buffering
+        case buffered
+        case metadata(String)
+        case heartbeat
+        case seeking(CMTime)
+        case seeked(CMTime)
+        case bitrateChanged(Double)
+        case errorOccurred(String)
+        case warning(String)
+
+        var description: String {
+            switch self {
+            case .initEvent:
+                return "Init: Player ready for load."
+            case .loading:
+                return "Loading"
+            case .loaded:
+                return "Loaded"
+            case .playing:
+                return "Playing"
+            case .paused:
+                return "Paused"
+            case .stopped:
+                return "Stopped"
+            case .buffering:
+                return "Buffering"
+            case .buffered:
+                return "Buffered"
+            case .metadata(let info):
+                return "Metadata received: \(info)"
+            case .heartbeat:
+                return "Heartbeat"
+            case .seeking(let time):
+                return "Seeking initiated to: \(time.seconds) sec"
+            case .seeked(let time):
+                return "Seek completed at: \(time.seconds) sec"
+            case .bitrateChanged(let bitrate):
+                return "Bitrate Changed: \(bitrate) bps"
+            case .errorOccurred(let errorMsg):
+                return "Error: \(errorMsg)"
+            case .warning(let warningMsg):
+                return "Warning: \(warningMsg)"
+            }
+        }
+    }
+    // init, metadata, heartbeat, *loading, *loaded, *playing, *paused, *buffering, *buffered, seeking, seeked, *bitrate_changed, *stopped, *error, *warning
+
+    // MARK: - Properties
+
+    private let player: AVPlayer
+    private let logger: Logger
+    private var timeControlStatusObservation: NSKeyValueObservation?
+    private var playerStatusObservation: NSKeyValueObservation?
+    private var bufferEmptyObservation: NSKeyValueObservation?
+    private var keepUpObservation: NSKeyValueObservation?
+    private var accessLogObserver: NSObjectProtocol?
+    private var errorLogObserver: NSObjectProtocol?
+
+    // We use an AVPlayerItemMetadataOutput to capture metadata events.
+    private let metadataOutput = AVPlayerItemMetadataOutput()
+
+    // Heartbeat Timer (fires, for example, every 5 seconds. Should be agreed by server and client)
+    private var heartbeatTimer: Timer?
+    private let heartbeatInterval: TimeInterval = 5.0
+
+    // MARK: - Initialization
+
+    /// Initialize the event logger with an AVPlayer and a logger.
+    /// - Parameters:
+    ///   - player: The AVPlayer whose events will be tracked.
+    ///   - logger: A logger conforming to Logger (e.g. ConsoleLogger, FileLogger).
+    public init(player: AVPlayer, logger: Logger = ConsoleLogger()) {
+        self.player = player
+        self.logger = logger
+        super.init()
+        // Log init event as soon as logger is created.
+        log(.initEvent)
+        setupObservers()
+        setupNotifications()
+        setupMetadataTracking()
+    }
+
+    deinit {
+        removeObservers()
+    }
+
+    // MARK: - Setup Observations
+
+    private func setupObservers() {
+        // Observe the currentItem's status to determine when it is ready.
+        playerStatusObservation = player.observe(\.currentItem?.status, options: [.new, .old]) { [weak self] player, _ in
+            guard let self = self else { return }
+            switch player.currentItem?.status {
+            case .unknown:
+                self.log(.loading)
+            case .readyToPlay:
+                self.log(.loaded)
+            case .failed:
+                let errorMsg = player.currentItem?.error?.localizedDescription ?? "Unknown error"
+                self.log(.errorOccurred(errorMsg))
+            default:
+                break
+            }
+        }
+
+        // Observe timeControlStatus to know when the player is playing or paused.
+        timeControlStatusObservation = player.observe(\.timeControlStatus, options: [.new, .old]) { [weak self] player, change in
+            guard let self = self else { return }
+            switch player.timeControlStatus {
+            case .playing:
+                self.log(.playing)
+                self.startHeartbeatTimer()
+            case .paused:
+                self.log(.paused)
+            case .waitingToPlayAtSpecifiedRate:
+                self.log(.buffering)
+            @unknown default:
+                break
+            }
+        }
+
+        // Observe buffering status (for the currentItem)
+        if let item = player.currentItem {
+            bufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] item, change in
+                if let isEmpty = change.newValue, isEmpty {
+                    self?.log(.buffering)
+                }
+            }
+
+            keepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, change in
+                if let likelyToKeepUp = change.newValue, likelyToKeepUp {
+                    self?.log(.buffered)
+                }
+            }
+        }
+    }
+
+    // MARK: - Setup Notifications
+
+    private func setupNotifications() {
+        // Playback ended
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(playbackDidEnd(notification:)),
+                                               name: .AVPlayerItemDidPlayToEndTime,
+                                               object: player.currentItem)
+
+        // Logs from the player item access log (bitrate changes, etc).
+        accessLogObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemNewAccessLogEntry,
+                                                                   object: player.currentItem,
+                                                                   queue: .main) { [weak self] _ in
+            self?.processAccessLog()
+        }
+
+        // Logs from the player item error log.
+        errorLogObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemNewErrorLogEntry,
+                                                                  object: player.currentItem,
+                                                                  queue: .main) { [weak self] _ in
+            self?.processErrorLog()
+        }
+
+        // Observe timeControlStatus to know when the player is playing or paused.
+        NotificationCenter.default.addObserver(self, selector: #selector(timeJumped(_:)), name: .AVPlayerItemTimeJumped, object: player.currentItem)
+    }
+
+        
+    // MARK: - Metadata Tracking
+
+    private func setupMetadataTracking() {
+        // For these samples, the metadata output is added to the current item.
+        // You could expand this to observe metadata events or changes you care about.
+        guard let item = player.currentItem else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.metadataOutput.setDelegate(self, queue: .main)
+            if !item.outputs.contains(self.metadataOutput) {
+                item.add(self.metadataOutput)
+            }
+        }
+    }
+
+    // MARK: - Heartbeat Implementation
+    private func startHeartbeatTimer() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval:heartbeatInterval, repeats: true) { [weak self] _ in
+            self?.log(.heartbeat)
+        }
+    }
+
+    private func stopHeartbeatTimer() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+    }
+
+    // MARK: - Logging Helper
+
+    private func log(_ event: PlayerEvent) {
+        let message = event.description
+        // Here, you might add timestamps or other formatting as needed.
+        logger.log(message)
+    }
+
+    // MARK: - Notification Handlers
+
+    @objc private func playbackDidEnd(notification: Notification) {
+        log(.stopped)
+        self.stopHeartbeatTimer()
+    }
+
+    @objc private func timeJumped(_ notification: Notification) {
+        guard let item = notification.object as? AVPlayerItem else { return }
+        // You'll get the "new" time.
+        let currentTime = item.currentTime()
+        log(.seeked(currentTime))
+    }
+
+    private func processAccessLog() {
+        guard let accessLog = player.currentItem?.accessLog(), let lastEvent = accessLog.events.last else {
+            return
+        }
+        log(.bitrateChanged(lastEvent.indicatedBitrate))
+    }
+
+    private func processErrorLog() {
+        guard let errorLog = player.currentItem?.errorLog(), let lastError = errorLog.events.last else {
+            return
+        }
+        let errorMsg = lastError.errorComment ?? "Unknown error"
+        log(.errorOccurred(errorMsg))
+    }
+
+    /// Seek operation, logging before and after the seek.
+    public func seek(to time: CMTime, completion: ((Bool) -> Void)? = nil) {
+        log(.seeking(time))
+        player.seek(to: time, completionHandler: { [weak self] finished in
+            self?.log(.seeked(time))
+            completion?(finished)
+        })
+    }
+
+    // MARK: - Remove Observers
+
+    private func removeObservers() {
+        timeControlStatusObservation?.invalidate()
+        playerStatusObservation?.invalidate()
+        bufferEmptyObservation?.invalidate()
+        keepUpObservation?.invalidate()
+        heartbeatTimer?.invalidate()
+
+        if let obs = accessLogObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        if let obs = errorLogObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        NotificationCenter.default.removeObserver(self)
+    }
+}
+
+// MARK: - AVPlayerItemMetadataOutputPushDelegate
+
+extension AVPlayerEventLogger: @preconcurrency AVPlayerItemMetadataOutputPushDelegate {
+
+    @MainActor
+    public func metadataOutput(_ output: AVPlayerItemMetadataOutput,
+                               didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup],
+                               from track: AVPlayerItemTrack?) {
+        // Example: Log metadata events. You could filter for specific metadata as needed.
+        for group in groups {
+            for metadataItem in group.items {
+                if let value = metadataItem.value(forKey: "value") {
+                    log(.warning("Metadata: \(value)"))
+                }
+            }
+        }
+    }
+}
+
+extension AVPlayerEventLogger: @unchecked Sendable {}
