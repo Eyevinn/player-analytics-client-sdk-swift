@@ -1,3 +1,10 @@
+//
+//  EventSinkPlayerLogger.swift
+//  VideoStreamTracker
+//
+//  Created by Kasper Blom on 2025-03-19.
+//
+
 import Foundation
 
 public final class EventSinkPlayerLogger {
@@ -14,15 +21,14 @@ public final class EventSinkPlayerLogger {
     }
 
     // MARK: - Logger
-    // tries to send the payload to the endopoint.
+    // Tries to send the payload to the endpoint.
     // Only reports to the debug-log if something goes wrong.
     public func log(_ payload: [String: Any]) {
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
-        // wet the content-Type header
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Seialize the payload ilnto JSON data.
+
         do {
             let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
             request.httpBody = jsonData
@@ -32,9 +38,18 @@ public final class EventSinkPlayerLogger {
         }
 
         // Create a datatask
-        let task = URLSession.shared.dataTask(with: request) { data, repsonse, error in
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 print("Error making POST request: \(error)")
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("Invalid response received")
+                return
+            }
+            if (200...299).contains(httpResponse.statusCode)  {
+
+                // everything is fine. So jump out.
                 return
             }
 
