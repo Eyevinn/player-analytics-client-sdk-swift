@@ -1,4 +1,5 @@
 # player-analytics-client-sdk-swift
+### a.k.a. VideoStreamTracker
 
 This is a Swift SDK package for the Eyevinn Player Analytics Service.
 

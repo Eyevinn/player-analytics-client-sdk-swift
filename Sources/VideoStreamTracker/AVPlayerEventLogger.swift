@@ -4,7 +4,7 @@ import AVFoundation
 
 public final class AVPlayerEventLogger: NSObject {
 
-    // Internal enum to list events. (No need to expose to the app.)
+    // Internal enum to list events.
     enum PlayerEvent: CustomStringConvertible {
         case initEvent
         case loading
@@ -61,7 +61,7 @@ public final class AVPlayerEventLogger: NSObject {
     // MARK: - Properties
 
     private let player: AVPlayer
-    private let analytics: AnalyticsEventSender  // Added analytics sender
+    private let analytics: AnalyticsEventSender
 
     // Observers & Notifications
     private var timeControlStatusObservation: NSKeyValueObservation?
@@ -71,7 +71,7 @@ public final class AVPlayerEventLogger: NSObject {
     private var accessLogObserver: NSObjectProtocol?
     private var errorLogObserver: NSObjectProtocol?
 
-    // We use an AVPlayerItemMetadataOutput to capture metadata events.
+    // AVPlayerItemMetadataOutput to capture metadata events.
     private let metadataOutput = AVPlayerItemMetadataOutput()
 
     // Heartbeat Timer (fires, for example, every 5 seconds)
@@ -97,13 +97,13 @@ public final class AVPlayerEventLogger: NSObject {
     /// Initialize the event logger with an AVPlayer and a logger.
     /// - Parameters:
     ///   - player: The AVPlayer whose events will be tracked.
-    ///   - logger: A logger conforming to Logger (e.g. ConsoleLogger, FileLogger).
+    ///   - eventSinkUrl: A URL to your jPlayer Analytics Eventsink
     public init(player: AVPlayer, eventSinkUrl url: URL) {
         self.player = player
         self.analytics = AnalyticsEventSender(logger: EventSinkPlayerLogger(endpoint: url))
         super.init()
         // Log init event as soon as logger is created.
-        log(.initEvent)
+        sendAnalytics(for:.initEvent)
         setupObservers()
         setupNotifications()
         setupMetadataTracking()
@@ -121,12 +121,12 @@ public final class AVPlayerEventLogger: NSObject {
             guard let self = self else { return }
             switch player.currentItem?.status {
             case .unknown:
-                self.log(.loading)
+                sendAnalytics(for:.loading)
             case .readyToPlay:
-                self.log(.loaded)
+                sendAnalytics(for:.loaded)
             case .failed:
                 let errorMsg = player.currentItem?.error?.localizedDescription ?? "Unknown error"
-                self.log(.errorOccurred(errorMsg))
+                sendAnalytics(for:.errorOccurred(errorMsg))
             default:
                 break
             }
@@ -137,12 +137,12 @@ public final class AVPlayerEventLogger: NSObject {
             guard let self = self else { return }
             switch player.timeControlStatus {
             case .playing:
-                self.log(.playing)
+                sendAnalytics(for:.playing)
                 self.startHeartbeatTimer()
             case .paused:
-                self.log(.paused)
+                sendAnalytics(for:.paused)
             case .waitingToPlayAtSpecifiedRate:
-                self.log(.buffering)
+                sendAnalytics(for:.buffering)
             @unknown default:
                 break
             }
@@ -152,13 +152,13 @@ public final class AVPlayerEventLogger: NSObject {
         if let item = player.currentItem {
             bufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] item, change in
                 if let isEmpty = change.newValue, isEmpty {
-                    self?.log(.buffering)
+                    self?.sendAnalytics(for:.buffering)
                 }
             }
 
             keepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, change in
                 if let likelyToKeepUp = change.newValue, likelyToKeepUp {
-                    self?.log(.buffered)
+                    self?.sendAnalytics(for:.buffered)
                 }
             }
         }
@@ -212,7 +212,7 @@ public final class AVPlayerEventLogger: NSObject {
     private func startHeartbeatTimer() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: heartbeatInterval, repeats: true) { [weak self] _ in
-            self?.log(.heartbeat)
+            self?.sendAnalytics(for:.heartbeat)
         }
     }
 
@@ -222,11 +222,6 @@ public final class AVPlayerEventLogger: NSObject {
     }
 
     // MARK: - Logging Helpers
-
-    private func log(_ event: PlayerEvent) {
-        // Also send analytics events.
-        sendAnalytics(for: event)
-    }
 
     /// Maps PlayerEvent values to AnalyticsEventSender calls.
     private func sendAnalytics(for event: PlayerEvent) {
@@ -316,34 +311,34 @@ public final class AVPlayerEventLogger: NSObject {
     // MARK: - Notification Handlers
 
     @objc private func playbackDidEnd(notification: Notification) {
-        log(.stopped)
+        sendAnalytics(for:.stopped)
         stopHeartbeatTimer()
     }
 
     @objc private func timeJumped(_ notification: Notification) {
         guard let item = notification.object as? AVPlayerItem else { return }
         let currentTime = item.currentTime()
-        log(.seeked(currentTime))
+        sendAnalytics(for:.seeked(currentTime))
     }
 
     private func processAccessLog() {
         guard let accessLog = player.currentItem?.accessLog(),
               let lastEvent = accessLog.events.last else { return }
-        log(.bitrateChanged(lastEvent.indicatedBitrate))
+        sendAnalytics(for:.bitrateChanged(lastEvent.indicatedBitrate))
     }
 
     private func processErrorLog() {
         guard let errorLog = player.currentItem?.errorLog(),
               let lastError = errorLog.events.last else { return }
         let errorMsg = lastError.errorComment ?? "Unknown error"
-        log(.errorOccurred(errorMsg))
+        sendAnalytics(for:.errorOccurred(errorMsg))
     }
 
     /// Seek operation that logs before and after the seek.
     public func seek(to time: CMTime, completion: ((Bool) -> Void)? = nil) {
-        log(.seeking(time))
+        sendAnalytics(for:.seeking(time))
         player.seek(to: time) { [weak self] finished in
-            self?.log(.seeked(time))
+            self?.sendAnalytics(for:.seeked(time))
             completion?(finished)
         }
     }
@@ -379,7 +374,7 @@ extension AVPlayerEventLogger: @preconcurrency AVPlayerItemMetadataOutputPushDel
         for group in groups {
             for metadataItem in group.items {
                 if let value = metadataItem.value(forKey: "value") {
-                    log(.warning("Metadata: \(value)"))
+                    sendAnalytics(for:.warning("Metadata: \(value)"))
                 }
             }
         }

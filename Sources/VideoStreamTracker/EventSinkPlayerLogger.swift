@@ -1,6 +1,6 @@
 import Foundation
 
-public final class EventSinkPlayerLogger {//: Logger {
+public final class EventSinkPlayerLogger {
     
     private let endpointURL: URL
 
@@ -13,7 +13,9 @@ public final class EventSinkPlayerLogger {//: Logger {
         self.endpointURL = endpoint
     }
 
-
+    // MARK: - Logger
+    // tries to send the payload to the endopoint.
+    // Only reports to the debug-log if something goes wrong.
     public func log(_ payload: [String: Any]) {
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
