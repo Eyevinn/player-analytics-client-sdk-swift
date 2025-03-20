@@ -1,6 +1,12 @@
+//
+//  AvPlayerEventLogger.swift
+//  VideoStreamTracker
+//
+//  Created by Kasper Blom on 2025-03-19.
+//
+
 import Foundation
 import AVFoundation
-// MARK: - AVPlayerEventLogger
 
 public final class AVPlayerEventLogger: NSObject {
 
@@ -76,7 +82,7 @@ public final class AVPlayerEventLogger: NSObject {
 
     // Heartbeat Timer (fires, for example, every 5 seconds)
     private var heartbeatTimer: Timer?
-    private let heartbeatInterval: TimeInterval = 5.0
+    private let heartbeatInterval: TimeInterval = 30.0
 
     // Helper computed properties for analytics.
     private var currentPlayhead: Int64 {
@@ -95,15 +101,17 @@ public final class AVPlayerEventLogger: NSObject {
     // MARK: - Initialization
 
     /// Initialize the event logger with an AVPlayer and a logger.
+    /// By instantiating this class, you will start tracking events from the AVPlayer
     /// - Parameters:
     ///   - player: The AVPlayer whose events will be tracked.
-    ///   - eventSinkUrl: A URL to your jPlayer Analytics Eventsink
+    ///   - eventSinkUrl: A URL to your Player Analytics Event sink
     public init(player: AVPlayer, eventSinkUrl url: URL) {
         self.player = player
         self.analytics = AnalyticsEventSender(logger: EventSinkPlayerLogger(endpoint: url))
         super.init()
-        // Log init event as soon as logger is created.
+        // Log init event as soon as logger is created and also loading since we usually don't get that.
         sendAnalytics(for:.initEvent)
+        sendAnalytics(for:.loading)
         setupObservers()
         setupNotifications()
         setupMetadataTracking()
@@ -223,7 +231,7 @@ public final class AVPlayerEventLogger: NSObject {
 
     // MARK: - Logging Helpers
 
-    /// Maps PlayerEvent values to AnalyticsEventSender calls.
+    /// Maps PlayerEvent values to AnalyticsEventSender calls for conformity with other platforms.
     private func sendAnalytics(for event: PlayerEvent) {
         switch event {
         case .initEvent:
@@ -234,9 +242,7 @@ public final class AVPlayerEventLogger: NSObject {
             analytics.sendLoadingEvent()
 
         case .loaded:
-            analytics.sendEvent(eventType: "loaded",
-                                timestamp: currentTimestamp,
-                                playhead: currentPlayhead,
+            analytics.sendLoadedEvent(playhead: currentPlayhead,
                                 duration: totalDuration)
 
         case .playing:
@@ -257,9 +263,7 @@ public final class AVPlayerEventLogger: NSObject {
                                          duration: totalDuration)
 
         case .buffered:
-            analytics.sendEvent(eventType: "buffered",
-                                timestamp: currentTimestamp,
-                                playhead: currentPlayhead,
+            analytics.sendBufferedEvent(playhead: currentPlayhead,
                                 duration: totalDuration)
 
         case .metadata(let info):
@@ -277,17 +281,13 @@ public final class AVPlayerEventLogger: NSObject {
 
         case .seeked(let time):
             let payload: [String: Any] = ["seekedTime": time.seconds]
-            analytics.sendEvent(eventType: "seeked",
-                                timestamp: currentTimestamp,
-                                playhead: currentPlayhead,
+            analytics.sendSeekedEvent(playhead: currentPlayhead,
                                 duration: totalDuration,
                                 payload: payload)
 
         case .bitrateChanged(let bitrate):
             let payload: [String: Any] = ["bitrate": bitrate]
-            analytics.sendEvent(eventType: "bitrateChanged",
-                                timestamp: currentTimestamp,
-                                playhead: currentPlayhead,
+            analytics.sendBitrateChangedEvent(playhead: currentPlayhead,
                                 duration: totalDuration,
                                 payload: payload)
 
@@ -300,9 +300,7 @@ public final class AVPlayerEventLogger: NSObject {
 
         case .warning(let warningMsg):
             let payload: [String: Any] = ["warning": warningMsg]
-            analytics.sendEvent(eventType: "warning",
-                                timestamp: currentTimestamp,
-                                playhead: currentPlayhead,
+            analytics.sendWarningEvent(playhead: currentPlayhead,
                                 duration: totalDuration,
                                 payload: payload)
         }
@@ -324,6 +322,10 @@ public final class AVPlayerEventLogger: NSObject {
     private func processAccessLog() {
         guard let accessLog = player.currentItem?.accessLog(),
               let lastEvent = accessLog.events.last else { return }
+
+        let avgAudioBitrate = lastEvent.averageAudioBitrate
+        let avgVideoBitrate = lastEvent.averageVideoBitrate
+        let evt = lastEvent
         sendAnalytics(for:.bitrateChanged(lastEvent.indicatedBitrate))
     }
 
