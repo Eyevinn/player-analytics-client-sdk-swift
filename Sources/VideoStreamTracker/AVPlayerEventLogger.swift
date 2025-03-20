@@ -324,7 +324,11 @@ public final class AVPlayerEventLogger: NSObject {
               let lastEvent = accessLog.events.last else { return }
 
         let avgAudioBitrate = lastEvent.averageAudioBitrate
+        #if os(watchOS)
+        let avgVideoBitrate = 0
+        #else
         let avgVideoBitrate = lastEvent.averageVideoBitrate
+        #endif
         let evt = lastEvent
         sendAnalytics(for:.bitrateChanged(lastEvent.indicatedBitrate))
     }
