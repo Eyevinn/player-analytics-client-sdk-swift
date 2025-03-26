@@ -29,64 +29,42 @@ internal final class StateMachine {
     }
 
     func nextStateBasedOn(_ nextEvent: SinkerEvent) -> SinkerEvent {
+        if nextEvent == .warning || nextEvent == .heartbeat || nextEvent == .metadata || nextEvent == .bitrateChanged {
+            return currentState
+        }
+
+
         switch currentState {
         case .initEvent:
-            return nextEvent
+            if nextEvent == .loading || nextEvent == .loaded || nextEvent == .stopped {
+                return nextEvent
+            }
         case .loading:
-            return nextEvent
+            if nextEvent == .loaded || nextEvent == .buffering || nextEvent == .error {
+                return nextEvent
+            }
         case .loaded:
-            if nextEvent == .playing {
+            if nextEvent == .playing || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking  {
                 return nextEvent
-            } else if nextEvent == .error {
-                return nextEvent
-            } else if nextEvent == .bitrateChanged {
-                return currentState
             }
         case .playing:
-            if nextEvent == .heartbeat {
-                return currentState
-            } else if nextEvent == .error {
+            if nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped {
                 return nextEvent
-            } else if nextEvent == .paused {
-                return nextEvent
-            } else if nextEvent == .buffering {
-                return nextEvent
-            } else if nextEvent == .seeking {
-                return nextEvent
-            } else if nextEvent == .stopped {
-                return nextEvent
-            } else if nextEvent == .bitrateChanged {
-                return currentState
-            } else if nextEvent == .warning {
-                return currentState
-            } else if nextEvent == .metadata {
-                return currentState
             }
-        case .heartbeat:
-            // This should be impossible
-            return .heartbeat
         case .error:
-            return .stopped
+            return currentState
         case .stopped:
-            if nextEvent == .loading {
+            if nextEvent == .initEvent {
                 return nextEvent
-            } else if nextEvent == .error {
+            } else {
                 return currentState
-            } else if nextEvent == .initEvent {
-                return nextEvent
             }
         case .seeking:
-            if nextEvent == .seeked {
-                return nextEvent
-            } else if nextEvent == .error {
+            if nextEvent == .seeked || nextEvent == .paused {
                 return nextEvent
             }
         case .seeked:
-            if nextEvent == .playing {
-                return nextEvent
-            } else if nextEvent == .error {
-                return nextEvent
-            } else if nextEvent == .paused {
+            if nextEvent == .playing || nextEvent == .paused {
                 return nextEvent
             }
         case .buffering:
@@ -96,60 +74,54 @@ internal final class StateMachine {
                 return nextEvent
             }
         case .buffered:
-            if nextEvent == .playing {
-                return nextEvent
-            } else if nextEvent == .error {
-                return nextEvent
-            } else if nextEvent == .paused {
+            if nextEvent == .playing || nextEvent == .seeking || nextEvent == .paused {
                 return nextEvent
             }
-        case .bitrateChanged:
-            return currentState
-        case .warning:
-            return currentState
         case .paused:
-            if nextEvent == .playing {
-                return nextEvent
-            } else if nextEvent == .error {
+            if nextEvent == .playing || nextEvent == .buffering {
                 return nextEvent
             }
-        case .metadata:
-            return currentState
+        default:
+            return .error
         }
 
-        return currentState
+        return .error   // Something is major-wrong so report error.
     }
 
     func currentStateAllows(_ nextEvent: SinkerEvent) -> Bool {
+        if nextEvent == .error || nextEvent == .stopped || nextEvent == .warning ||  nextEvent == .heartbeat || nextEvent == .metadata {
+            return true
+        }
+
         switch currentState {
         case .initEvent:
-            return nextEvent == .loading || nextEvent == .initEvent
+            return nextEvent == .loading || nextEvent == .loaded || nextEvent == .initEvent
         case .loading:
-            return nextEvent == .loaded || nextEvent == .error
+            return nextEvent == .loaded || nextEvent == .buffering
         case .loaded:
-            return nextEvent == .playing || nextEvent == .error || nextEvent == .bitrateChanged
+            return nextEvent == .playing || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking
         case .playing:
-            return nextEvent == .heartbeat || nextEvent == .error || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped || nextEvent == .bitrateChanged || nextEvent == .warning || nextEvent == .metadata
+            return nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped
         case .heartbeat:
             return true
         case .error:
-            return nextEvent == .stopped
+            return true
         case .stopped:
-            return nextEvent == .loading || nextEvent == .error || nextEvent == .initEvent
+            return nextEvent == .initEvent
         case .seeking:
-            return nextEvent == .seeked || nextEvent == .error
+            return nextEvent == .seeked || nextEvent == .paused
         case .seeked:
-            return nextEvent == .playing || nextEvent == .error || nextEvent == .paused
+            return nextEvent == .playing || nextEvent == .paused
         case .buffering:
-            return nextEvent == .buffered || nextEvent == .error
+            return nextEvent == .buffered || nextEvent == .seeking || nextEvent == .stopped
         case .buffered:
-            return nextEvent == .playing || nextEvent == .error || nextEvent == .paused
+            return nextEvent == .playing || nextEvent == .seeking || nextEvent == .paused
         case .bitrateChanged:
             return true
         case .warning:
             return true
         case .paused:
-            return nextEvent == .playing || nextEvent == .error
+            return nextEvent == .playing || nextEvent == .buffering
         case .metadata:
             return true
         }
