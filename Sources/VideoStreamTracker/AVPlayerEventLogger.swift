@@ -145,8 +145,8 @@ public final class AVPlayerEventLogger: NSObject {
             guard let self = self else { return }
             switch player.timeControlStatus {
             case .playing:
-                sendAnalytics(for:.playing)
                 self.startHeartbeatTimer()
+                sendAnalytics(for:.playing)
             case .paused:
                 sendAnalytics(for:.paused)
             case .waitingToPlayAtSpecifiedRate:
@@ -309,8 +309,8 @@ public final class AVPlayerEventLogger: NSObject {
     // MARK: - Notification Handlers
 
     @objc private func playbackDidEnd(notification: Notification) {
-        sendAnalytics(for:.stopped)
         stopHeartbeatTimer()
+        sendAnalytics(for:.stopped)
     }
 
     @objc private func timeJumped(_ notification: Notification) {
