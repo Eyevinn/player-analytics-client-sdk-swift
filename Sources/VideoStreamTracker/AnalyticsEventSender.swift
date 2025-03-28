@@ -24,6 +24,7 @@ internal enum SinkerEvent: CustomStringConvertible {
     case warning
     case paused
     case metadata
+    case report
 
     var description: String {
         switch self {
@@ -57,6 +58,8 @@ internal enum SinkerEvent: CustomStringConvertible {
             return "paused"
         case .metadata:
             return "metadata"
+        case .report:
+            return "report"
         }
     }
 }
@@ -241,6 +244,16 @@ internal final class AnalyticsEventSender {
                     playhead: playhead,
                     duration: duration,
                     payload: payload)
+    }
+
+    func sendReportEvent(playhead: Int64,
+                         duration: Int64,
+                         payload: [String: Any]?=nil) {
+        sendEvent(eventType: .report,
+                  timestamp: currentTimestamp,
+                  playhead: playhead,
+                  duration: duration,
+                  payload: payload)
     }
 
     private func sendToEventSink(event: [String: Any]) {

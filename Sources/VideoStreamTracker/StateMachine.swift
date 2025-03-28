@@ -81,6 +81,8 @@ internal final class StateMachine {
             if nextEvent == .playing || nextEvent == .buffering {
                 return nextEvent
             }
+        case .report:
+            return currentState
         default:
             return .error
         }
@@ -99,30 +101,32 @@ internal final class StateMachine {
         case .loading:
             return nextEvent == .loaded || nextEvent == .buffering
         case .loaded:
-            return nextEvent == .playing || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking
+            return nextEvent == .playing || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .report
         case .playing:
-            return nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped
+            return nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped || nextEvent == .report
         case .heartbeat:
             return true
         case .error:
             return true
         case .stopped:
-            return nextEvent == .initEvent
+            return nextEvent == .initEvent || nextEvent == .report
         case .seeking:
-            return nextEvent == .seeked || nextEvent == .paused
+            return nextEvent == .seeked || nextEvent == .paused || nextEvent == .report
         case .seeked:
-            return nextEvent == .playing || nextEvent == .paused
+            return nextEvent == .playing || nextEvent == .paused || nextEvent == .report
         case .buffering:
-            return nextEvent == .buffered || nextEvent == .seeking || nextEvent == .stopped
+            return nextEvent == .buffered || nextEvent == .seeking || nextEvent == .stopped || nextEvent == .report
         case .buffered:
-            return nextEvent == .playing || nextEvent == .seeking || nextEvent == .paused
+            return nextEvent == .playing || nextEvent == .seeking || nextEvent == .paused || nextEvent == .report
         case .bitrateChanged:
             return true
         case .warning:
             return true
         case .paused:
-            return nextEvent == .playing || nextEvent == .buffering
+            return nextEvent == .playing || nextEvent == .buffering || nextEvent == .report
         case .metadata:
+            return true
+        case .report:
             return true
         }
     }
