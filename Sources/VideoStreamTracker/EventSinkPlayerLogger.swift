@@ -66,9 +66,9 @@ public final class EventSinkPlayerLogger {
             // If you expect a JSON response, decode it.
             do {
                 let analyticResponse = try JSONDecoder().decode(AnalyticsResponse.self, from: data)
-                print("Decoded response: sessionId = \(analyticResponse.sessionId),heartbeatInterval = \(analyticResponse.heartbeatInterval)")
+                print("Response: \(analyticResponse)")
             } catch {
-                print ("Error decoding response JSON: \(error)")
+                print ("Error decoding response JSON: \(error) from data: \(data)")
             }
         }
 
