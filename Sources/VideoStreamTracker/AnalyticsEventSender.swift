@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import UIKit
 
 internal enum SinkerEvent: CustomStringConvertible {
     case initEvent
@@ -74,6 +75,22 @@ internal final class AnalyticsEventSender {
 
     public var lastError: Error? = nil
 
+    /// Obtain the machine hardware platform from the `uname()` unix command
+    ///
+    /// Example of return values
+    ///  - `"iPhone8,1"` = iPhone 6s
+    ///  - `"iPad6,7"` = iPad Pro (12.9-inch)
+    static internal var unameMachine: String {
+        var utsnameInstance = utsname()
+        uname(&utsnameInstance)
+        let optionalString: String? = withUnsafePointer(to: &utsnameInstance.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                ptr in String.init(validatingUTF8: ptr)
+            }
+        }
+        return optionalString ?? "N/A"
+    }
+
     /// A computed property to retrieve the current time in milliseconds.
     private var currentTimestamp: Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
@@ -126,7 +143,9 @@ internal final class AnalyticsEventSender {
     }
 
     func sendMetadataEvent(isLive: Bool, contentTitle: String?) {
+        
         let payload: [String: Any] = [
+            "deviceType": AnalyticsEventSender.unameMachine,
             "live": isLive,
             "contentTitle": contentTitle as Any
         ]
