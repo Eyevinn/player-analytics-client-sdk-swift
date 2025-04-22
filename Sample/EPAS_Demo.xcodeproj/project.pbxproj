@@ -11,13 +11,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		301228FF2DB78BA800EA5A13 /* SEPA_Demo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SEPA_Demo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		301228FF2DB78BA800EA5A13 /* EPAS_Demo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EPAS_Demo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		301229012DB78BA800EA5A13 /* SEPA_Demo */ = {
+		301229012DB78BA800EA5A13 /* EPAS_Demo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = SEPA_Demo;
+			path = EPAS_Demo;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -37,7 +37,7 @@
 		301228F62DB78BA800EA5A13 = {
 			isa = PBXGroup;
 			children = (
-				301229012DB78BA800EA5A13 /* SEPA_Demo */,
+				301229012DB78BA800EA5A13 /* EPAS_Demo */,
 				301229002DB78BA800EA5A13 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -45,7 +45,7 @@
 		301229002DB78BA800EA5A13 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				301228FF2DB78BA800EA5A13 /* SEPA_Demo.app */,
+				301228FF2DB78BA800EA5A13 /* EPAS_Demo.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,9 +53,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		301228FE2DB78BA800EA5A13 /* SEPA_Demo */ = {
+		301228FE2DB78BA800EA5A13 /* EPAS_Demo */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3012290A2DB78BAA00EA5A13 /* Build configuration list for PBXNativeTarget "SEPA_Demo" */;
+			buildConfigurationList = 3012290A2DB78BAA00EA5A13 /* Build configuration list for PBXNativeTarget "EPAS_Demo" */;
 			buildPhases = (
 				301228FB2DB78BA800EA5A13 /* Sources */,
 				301228FC2DB78BA800EA5A13 /* Frameworks */,
@@ -66,14 +66,14 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				301229012DB78BA800EA5A13 /* SEPA_Demo */,
+				301229012DB78BA800EA5A13 /* EPAS_Demo */,
 			);
-			name = SEPA_Demo;
+			name = EPAS_Demo;
 			packageProductDependencies = (
 				3012290E2DB78C2A00EA5A13 /* VideoStreamTracker */,
 			);
 			productName = SEPA_Demo;
-			productReference = 301228FF2DB78BA800EA5A13 /* SEPA_Demo.app */;
+			productReference = 301228FF2DB78BA800EA5A13 /* EPAS_Demo.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -91,7 +91,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 301228FA2DB78BA800EA5A13 /* Build configuration list for PBXProject "SEPA_Demo" */;
+			buildConfigurationList = 301228FA2DB78BA800EA5A13 /* Build configuration list for PBXProject "EPAS_Demo" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -108,7 +108,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				301228FE2DB78BA800EA5A13 /* SEPA_Demo */,
+				301228FE2DB78BA800EA5A13 /* EPAS_Demo */,
 			);
 		};
 /* End PBXProject section */
@@ -314,7 +314,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		301228FA2DB78BA800EA5A13 /* Build configuration list for PBXProject "SEPA_Demo" */ = {
+		301228FA2DB78BA800EA5A13 /* Build configuration list for PBXProject "EPAS_Demo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				301229082DB78BAA00EA5A13 /* Debug */,
@@ -323,7 +323,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3012290A2DB78BAA00EA5A13 /* Build configuration list for PBXNativeTarget "SEPA_Demo" */ = {
+		3012290A2DB78BAA00EA5A13 /* Build configuration list for PBXNativeTarget "EPAS_Demo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3012290B2DB78BAA00EA5A13 /* Debug */,

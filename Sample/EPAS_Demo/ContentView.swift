@@ -1,6 +1,5 @@
 //
 //  ContentView.swift
-//  SEPA_Demo
 //
 //  Created by Kasper Blom on 2025-04-22.
 //
