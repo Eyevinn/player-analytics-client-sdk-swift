@@ -1,6 +1,5 @@
 //
-//  SEPA_DemoApp.swift
-//  SEPA_Demo
+//  EPAS_DemoApp.swift
 //
 //  Created by Kasper Blom on 2025-04-22.
 //
@@ -8,7 +7,7 @@
 import SwiftUI
 
 @main
-struct SEPA_DemoApp: App {
+struct EPAS_DemoApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
