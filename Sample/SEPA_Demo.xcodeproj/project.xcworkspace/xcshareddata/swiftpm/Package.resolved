@@ -1,0 +1,15 @@
+{
+  "originHash" : "41c8a5c4731eb32ee46887c091f1813eb4981621e9abfebd9a4e124b54ad36b0",
+  "pins" : [
+    {
+      "identity" : "player-analytics-client-sdk-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Eyevinn/player-analytics-client-sdk-swift",
+      "state" : {
+        "branch" : "main",
+        "revision" : "4d7822458496942458d2dcdab68dab4d9ad2a1f5"
+      }
+    }
+  ],
+  "version" : 3
+}

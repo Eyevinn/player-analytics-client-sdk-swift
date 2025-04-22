@@ -115,6 +115,7 @@ public final class AVPlayerEventLogger: NSObject {
         // Log init event as soon as logger is created and also loading since we usually don't get that.
         sendAnalytics(for: .initEvent)
         sendAnalytics(for: .loading)
+        sendAnalytics(for: .metadata(""))
         setupObservers()
         setupNotifications()
         setupMetadataTracking()
