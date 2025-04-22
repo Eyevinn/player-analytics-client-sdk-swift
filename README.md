@@ -49,7 +49,7 @@ let logger = AVPlayerEventLogger(
 }
 ```
 ### Demo project
-There is a demo-project included in the repository. You can run it by opening the `SEPA_Demo.xcodeproj` file in Xcode. The demo project is a simple SwiftUI app that uses the SDK to send events to the Eyevinn Player Analytics Eventsink.
+There is a demo-project included in the repository. You can run it by opening the `EPAS_Demo.xcodeproj` file in Xcode. The demo project is a simple SwiftUI app that uses the SDK to send events to the Eyevinn Player Analytics Eventsink.
 
 # About Eyevinn
 We are [Eyevinn Technology](https://www.eyevinntechnology.se/), and we help companies in the TV, media, and entertainment sectors optimize costs and boost profitability through enhanced media solutions. We are independent in a way that we are not commercially tied to any platform or technology vendor. As our way to innovate and push the industry forward, we develop proof-of-concepts and tools. We share things we have learn and code as open-source.
@@ -60,7 +60,7 @@ Read our blogs and articles here:
 
 - [Developer blogs](https://dev.to/video)
 - [Medium](https://eyevinntechnology.medium.com/)
-- [OSC](https://osaas.io/)
+- [OSC](https://blog.osaas.io/)
 - [LinkedIn](https://www.linkedin.com/company/eyevinn/)
 
 Want to know more about Eyevinn, contact us at [info@eyevinn.se](mailto:info@eyevinn.se)!
