@@ -364,7 +364,11 @@ public final class AVPlayerEventLogger: NSObject {
             let lastEvent = accessLog.events.last
         else { return }
 
+        print("###########################")
+        print ("Access log: \(accessLog)")
+        print("###########################")
         let avgAudioBitrate = lastEvent.averageAudioBitrate
+
         #if os(watchOS)
             let avgVideoBitrate = 0
         #else
@@ -424,7 +428,7 @@ extension AVPlayerEventLogger: @preconcurrency AVPlayerItemMetadataOutputPushDel
         for group in groups {
             for metadataItem in group.items {
                 if let value = metadataItem.value(forKey: "value") {
-                    sendAnalytics(for: .warning("Metadata: \(value)"))
+                    sendAnalytics(for: .metadata("\(value)"))
                 }
             }
         }
