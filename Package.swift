@@ -6,12 +6,12 @@ import PackageDescription
 let package = Package(
     name: "VideoStreamTracker",
     platforms: [
-        .iOS(.v13), .tvOS(.v13)
+        .iOS(.v16), .tvOS(.v16)
     ],
     products: [
         .library(
             name: "VideoStreamTracker",
-            targets: ["VideoStreamTracker"]
+            targets: ["VideoStreamTracker", "SGAI"]
         ),
     ],
     dependencies: [], 
@@ -19,6 +19,10 @@ let package = Package(
         .target(
             name: "VideoStreamTracker",
             dependencies: []
+        ),
+        .target(
+            name: "SGAI",
+            path: "Sources/SGAI"
         ),
         .testTarget(
             name: "VideoStreamTrackerTests",
