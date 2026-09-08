@@ -94,7 +94,48 @@ public final class AVPlayerEventLogger: NSObject {
 
     private var totalDuration: Int64 {
         guard let duration = player.currentItem?.duration else { return -1 }
+        // Spec `duration` for Live content is the live edge expressed as UTC wall-clock time in
+        // milliseconds (VOD stays the finite stream length). For live, derive the live edge from
+        // the item's `currentDate()`; when it is indeterminable, fall back to -1 (unknown).
+        if isLiveContent {
+            return AVPlayerEventLogger.liveEdgeUTCMilliseconds(from: player.currentItem?.currentDate())
+        }
         return AVPlayerEventLogger.normalizeDuration(duration)
+    }
+
+    /// Whether the item duration indicates Live / indefinite content.
+    ///
+    /// Live streams surface an indefinite (or otherwise non-numeric) `CMTime` duration, which is
+    /// exactly the set of values `normalizeDuration` maps to the `-1` unknown sentinel. A finite,
+    /// numeric duration is VOD.
+    private var isLiveContent: Bool {
+        guard let duration = player.currentItem?.duration else { return false }
+        return AVPlayerEventLogger.isLiveStream(duration)
+    }
+
+    /// Detects Live content from an item duration `CMTime`.
+    ///
+    /// - Parameter cmTime: The item's duration `CMTime`.
+    /// - Returns: `true` when the duration is indefinite / non-numeric / non-finite (Live),
+    ///   `false` for a finite, numeric duration (VOD).
+    static func isLiveStream(_ cmTime: CMTime) -> Bool {
+        guard CMTIME_IS_NUMERIC(cmTime) else { return true }
+        return !cmTime.seconds.isFinite
+    }
+
+    /// Converts a live-edge wall-clock `Date` into the UTC milliseconds value the spec expects for
+    /// the `duration` field of Live content.
+    ///
+    /// Spec `duration` contract (Live): "live edge in UTC. -1 if unknown". This pure helper is
+    /// kept free of any `AVPlayer` dependency so it can be unit-tested directly; the AVPlayer glue
+    /// (`player.currentItem?.currentDate()`) stays thin in `totalDuration`.
+    ///
+    /// - Parameter date: The live-edge wall-clock date, or `nil` when it is indeterminable.
+    /// - Returns: `Int64(date.timeIntervalSince1970 * 1000)` (UTC ms) for a determinable, finite
+    ///   live edge; `-1` when `nil` or non-finite.
+    static func liveEdgeUTCMilliseconds(from date: Date?) -> Int64 {
+        guard let interval = date?.timeIntervalSince1970, interval.isFinite else { return -1 }
+        return Int64(interval * 1000)
     }
 
     /// Normalizes an `AVPlayerItem` duration into the milliseconds value expected by the
