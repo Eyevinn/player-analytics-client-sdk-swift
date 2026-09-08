@@ -93,8 +93,29 @@ public final class AVPlayerEventLogger: NSObject {
     }
 
     private var totalDuration: Int64 {
-        guard let duration = player.currentItem?.duration.seconds, duration > 0 else { return 0 }
-        return Int64(duration * 1000)
+        guard let duration = player.currentItem?.duration else { return -1 }
+        return AVPlayerEventLogger.normalizeDuration(duration)
+    }
+
+    /// Normalizes an `AVPlayerItem` duration into the milliseconds value expected by the
+    /// analytics spec.
+    ///
+    /// Spec `duration` contract: a finite length is reported in milliseconds, while an
+    /// unknown/unavailable duration must be `-1` (never `0`, which is reserved for a genuine
+    /// zero-length item). Live / indefinite items report `duration.seconds` as `NaN`, so the
+    /// previous `duration > 0` guard incorrectly collapsed both "unknown" and "zero-length"
+    /// into `0`.
+    ///
+    /// - Parameter cmTime: The item's duration `CMTime`.
+    /// - Returns: `Int64(seconds * 1000)` for a finite, non-negative duration (0-length stays
+    ///   `0`); `-1` for an indefinite, non-numeric, or `NaN` duration.
+    static func normalizeDuration(_ cmTime: CMTime) -> Int64 {
+        // Indefinite (live edge) or otherwise non-numeric (invalid / infinite) -> unknown.
+        guard CMTIME_IS_NUMERIC(cmTime) else { return -1 }
+        let seconds = cmTime.seconds
+        // Guard against NaN / negative sentinels that survive the numeric check.
+        guard seconds.isFinite, seconds >= 0 else { return -1 }
+        return Int64(seconds * 1000)
     }
 
     private var currentTimestamp: Int64 {
