@@ -97,6 +97,36 @@ public final class AVPlayerEventLogger: NSObject {
         return Int64(duration * 1000)
     }
 
+    /// Whether the current item should be reported as live in the metadata event.
+    ///
+    /// Derived from the current item's duration: a live stream reports an indefinite /
+    /// non-numeric duration, whereas VOD reports a finite length. Falls back to `false`
+    /// (VOD) when there is no current item.
+    private var isLiveContent: Bool {
+        guard let duration = player.currentItem?.duration else { return false }
+        return AVPlayerEventLogger.isLiveStream(duration)
+    }
+
+    /// Determines whether a stream is live from its `AVPlayerItem` duration.
+    ///
+    /// Spec `metadata.payload.live` contract: `true` for live/dynamic content, `false` for
+    /// VOD/static content. AVFoundation surfaces live/indefinite items with a duration that
+    /// is either explicitly indefinite or otherwise non-numeric (invalid/infinite), and their
+    /// `duration.seconds` evaluates to `NaN`. A VOD item exposes a finite, numeric duration.
+    ///
+    /// Kept pure and `CMTime`-based (no `AVPlayer` dependency) so it is unit-testable off-device,
+    /// mirroring how #26 structured `normalizeDuration`.
+    ///
+    /// - Parameter cmDuration: The item's duration `CMTime`.
+    /// - Returns: `true` when the duration is indefinite / non-numeric / `NaN` (live);
+    ///   `false` for a finite, numeric duration (VOD).
+    static func isLiveStream(_ cmDuration: CMTime) -> Bool {
+        // Indefinite (live edge) or otherwise non-numeric (invalid / infinite) -> live.
+        guard CMTIME_IS_NUMERIC(cmDuration) else { return true }
+        // A numeric CMTime can still surface NaN/infinite seconds; treat those as live too.
+        return !cmDuration.seconds.isFinite
+    }
+
     private var currentTimestamp: Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
     }
@@ -293,8 +323,13 @@ public final class AVPlayerEventLogger: NSObject {
                 duration: totalDuration)
 
         case .metadata(let info):
+            // Derive live/VOD from the current item rather than hardcoding false. Note: the
+            // metadata event is also sent from init before the item's duration is known; in
+            // that window `isLiveContent` falls back to false (VOD). The spec allows the
+            // server to handle `live` toggling from true to false, so a later, better-informed
+            // metadata event can correct an early conservative value.
             analytics.sendMetadataEvent(
-                isLive: false,
+                isLive: isLiveContent,
                 contentTitle: info)
 
         case .heartbeat:
