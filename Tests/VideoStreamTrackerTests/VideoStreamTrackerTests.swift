@@ -78,4 +78,41 @@ final class VideoStreamTrackerTests: XCTestCase {
         let time = CMTime(seconds: 1.5, preferredTimescale: 600)
         XCTAssertEqual(AVPlayerEventLogger.normalizeDuration(time), 1_500)
     }
+
+    // MARK: - isLiveStream
+
+    func testIsLiveStreamIndefiniteIsLive() {
+        // Live streams surface an indefinite duration.
+        XCTAssertTrue(AVPlayerEventLogger.isLiveStream(.indefinite))
+    }
+
+    func testIsLiveStreamPositiveInfinityIsLive() {
+        XCTAssertTrue(AVPlayerEventLogger.isLiveStream(.positiveInfinity))
+    }
+
+    func testIsLiveStreamFiniteIsNotLive() {
+        let tenSeconds = CMTime(seconds: 10, preferredTimescale: 600)
+        XCTAssertFalse(AVPlayerEventLogger.isLiveStream(tenSeconds))
+    }
+
+    func testIsLiveStreamZeroLengthIsNotLive() {
+        XCTAssertFalse(AVPlayerEventLogger.isLiveStream(.zero))
+    }
+
+    // MARK: - liveEdgeUTCMilliseconds
+
+    func testLiveEdgeUTCMillisecondsNilReturnsMinusOne() {
+        // Live edge indeterminable -> unknown (-1), mirroring the normalizeDuration contract.
+        XCTAssertEqual(AVPlayerEventLogger.liveEdgeUTCMilliseconds(from: nil), -1)
+    }
+
+    func testLiveEdgeUTCMillisecondsReturnsUTCMilliseconds() {
+        // Spec: Live `duration` is the live edge as UTC wall-clock time in milliseconds.
+        let date = Date(timeIntervalSince1970: 1_634_911_668.339)
+        XCTAssertEqual(AVPlayerEventLogger.liveEdgeUTCMilliseconds(from: date), 1_634_911_668_339)
+    }
+
+    func testLiveEdgeUTCMillisecondsEpochReturnsZero() {
+        XCTAssertEqual(AVPlayerEventLogger.liveEdgeUTCMilliseconds(from: Date(timeIntervalSince1970: 0)), 0)
+    }
 }
