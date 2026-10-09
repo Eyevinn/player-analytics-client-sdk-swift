@@ -103,26 +103,6 @@ public final class AVPlayerEventLogger: NSObject {
         return AVPlayerEventLogger.normalizeDuration(duration)
     }
 
-    /// Whether the item duration indicates Live / indefinite content.
-    ///
-    /// Live streams surface an indefinite (or otherwise non-numeric) `CMTime` duration, which is
-    /// exactly the set of values `normalizeDuration` maps to the `-1` unknown sentinel. A finite,
-    /// numeric duration is VOD.
-    private var isLiveContent: Bool {
-        guard let duration = player.currentItem?.duration else { return false }
-        return AVPlayerEventLogger.isLiveStream(duration)
-    }
-
-    /// Detects Live content from an item duration `CMTime`.
-    ///
-    /// - Parameter cmTime: The item's duration `CMTime`.
-    /// - Returns: `true` when the duration is indefinite / non-numeric / non-finite (Live),
-    ///   `false` for a finite, numeric duration (VOD).
-    static func isLiveStream(_ cmTime: CMTime) -> Bool {
-        guard CMTIME_IS_NUMERIC(cmTime) else { return true }
-        return !cmTime.seconds.isFinite
-    }
-
     /// Converts a live-edge wall-clock `Date` into the UTC milliseconds value the spec expects for
     /// the `duration` field of Live content.
     ///
