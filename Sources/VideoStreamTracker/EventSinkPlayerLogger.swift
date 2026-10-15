@@ -7,7 +7,13 @@
 
 import Foundation
 
-public final class EventSinkPlayerLogger {
+/// Receives each analytics event as it is sent. `EventSinkPlayerLogger` posts it to the
+/// event sink; tests substitute a capturing implementation.
+internal protocol EventLogging: AnyObject {
+    func log(_ payload: [String: Any])
+}
+
+public final class EventSinkPlayerLogger: EventLogging {
     
     private let endpointURL: URL
 

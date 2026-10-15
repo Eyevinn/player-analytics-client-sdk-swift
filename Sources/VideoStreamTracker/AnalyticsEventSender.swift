@@ -65,11 +65,19 @@ internal enum SinkerEvent: CustomStringConvertible {
     }
 }
 
+/// Why a session ended, sent as `stopped.payload.reason` (EPAS: "ended" | "error" | "aborted" | "unknown").
+internal enum StopReason: String {
+    case ended
+    case error
+    case aborted
+    case unknown
+}
+
 /// The `AnalyticsEventSender` class is responsible for sending analytics events to the event sink if they are allowed by the state machine.
 /// It also keeps track of the current session ID.
 internal final class AnalyticsEventSender {
     private let sessionId = UUID().uuidString
-    private let eventSink: EventSinkPlayerLogger
+    private let eventSink: EventLogging
 
     private let stateMachine = StateMachine()
 
@@ -96,7 +104,7 @@ internal final class AnalyticsEventSender {
         Int64(Date().timeIntervalSince1970 * 1000)
     }
 
-    public init(logger eventSink : EventSinkPlayerLogger) {
+    init(logger eventSink: EventLogging) {
         self.eventSink = eventSink
     }
 
@@ -229,8 +237,9 @@ internal final class AnalyticsEventSender {
     }
 
 
-    func sendStoppedEvent(playhead: Int64, duration: Int64, reason: String?) {
-        let payload: [String: Any] = ["reason": reason as Any]
+    func sendStoppedEvent(playhead: Int64, duration: Int64, reason: StopReason) {
+        // EPAS requires a string reason; a JSON null is rejected by the eventsink (#40).
+        let payload: [String: Any] = ["reason": reason.rawValue]
         sendEvent(eventType: .stopped,
                   timestamp: currentTimestamp,
                   playhead: playhead,
