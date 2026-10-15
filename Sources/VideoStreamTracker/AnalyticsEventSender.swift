@@ -99,6 +99,41 @@ internal final class AnalyticsEventSender {
         return optionalString ?? "N/A"
     }
 
+    /// The device's model identifier, e.g. `"iPhone16,1"`, `"iPad13,4"`, `"AppleTV14,1"`.
+    /// On a simulator `uname()` returns the host CPU (`"arm64"`), so the simulated model is read
+    /// from `SIMULATOR_MODEL_IDENTIFIER` instead.
+    static internal var modelIdentifier: String {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"], !simulated.isEmpty {
+            return simulated
+        }
+        return unameMachine
+    }
+
+    /// Maps a model identifier to the EPAS `deviceType` class, using the same vocabulary as the
+    /// Web SDK (`mobile`, `tablet`, `desktop`) plus `tv`. Returns `nil` when the class is unknown,
+    /// so the field is omitted rather than guessed.
+    static internal func deviceType(forModelIdentifier identifier: String) -> String? {
+        if identifier.hasPrefix("AppleTV") { return "tv" }
+        if identifier.hasPrefix("iPad") { return "tablet" }
+        if identifier.hasPrefix("iPhone") || identifier.hasPrefix("iPod") { return "mobile" }
+        if identifier.hasPrefix("Mac") { return "desktop" }  // iOS app running on Apple silicon Mac
+        return nil
+    }
+
+    /// `deviceType` and `deviceModel` for the metadata payload.
+    static internal var deviceFields: [String: Any] {
+        let model = modelIdentifier
+        var fields: [String: Any] = ["deviceModel": model]
+        #if os(tvOS)
+        fields["deviceType"] = "tv"
+        #else
+        if let type = deviceType(forModelIdentifier: model) {
+            fields["deviceType"] = type
+        }
+        #endif
+        return fields
+    }
+
     /// A computed property to retrieve the current time in milliseconds.
     private var currentTimestamp: Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
@@ -152,11 +187,11 @@ internal final class AnalyticsEventSender {
 
     func sendMetadataEvent(isLive: Bool, contentTitle: String?) {
         
-        let payload: [String: Any] = [
-            "deviceType": AnalyticsEventSender.unameMachine,
+        var payload: [String: Any] = [
             "live": isLive,
             "contentTitle": contentTitle as Any
         ]
+        payload.merge(AnalyticsEventSender.deviceFields) { _, device in device }
         sendEvent(eventType: .metadata,
                   timestamp: currentTimestamp,
                   playhead: 0,

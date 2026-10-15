@@ -200,3 +200,23 @@ final class BitrateConversionTests: XCTestCase {
         XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: .infinity), 0)
     }
 }
+
+// MARK: - deviceType / deviceModel (#42)
+
+final class DeviceTypeTests: XCTestCase {
+    func testModelIdentifierMapsToDeviceClass() {
+        XCTAssertEqual(AnalyticsEventSender.deviceType(forModelIdentifier: "iPhone18,1"), "mobile")
+        XCTAssertEqual(AnalyticsEventSender.deviceType(forModelIdentifier: "iPod9,1"), "mobile")
+        XCTAssertEqual(AnalyticsEventSender.deviceType(forModelIdentifier: "iPad16,3"), "tablet")
+        XCTAssertEqual(AnalyticsEventSender.deviceType(forModelIdentifier: "AppleTV14,1"), "tv")
+        XCTAssertEqual(AnalyticsEventSender.deviceType(forModelIdentifier: "Mac14,2"), "desktop")
+        XCTAssertNil(AnalyticsEventSender.deviceType(forModelIdentifier: "arm64"))
+    }
+
+    func testDeviceFieldsNeverReportCPUArchitecture() {
+        let fields = AnalyticsEventSender.deviceFields
+        XCTAssertNotEqual(fields["deviceType"] as? String, "arm64")
+        XCTAssertNotEqual(fields["deviceModel"] as? String, "arm64")
+        XCTAssertNotNil(fields["deviceType"])
+    }
+}
