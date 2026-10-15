@@ -90,6 +90,9 @@ public final class AVPlayerEventLogger: NSObject {
     // Set once a `stopped` event has been sent, so a session never sends two.
     private var hasStopped = false
 
+    // The session's metadata is sent once, when the item is ready to play.
+    private var hasSentItemMetadata = false
+
     // Helper computed properties for analytics.
     private var currentPlayhead: Int64 {
         AVPlayerEventLogger.playheadMilliseconds(player.currentTime())
@@ -209,9 +212,9 @@ public final class AVPlayerEventLogger: NSObject {
         self.analytics = AnalyticsEventSender(logger: logger)
         super.init()
         // Log init event as soon as logger is created and also loading since we usually don't get that.
+        // Metadata waits until the item is ready to play, when live/VOD is known (#41).
         sendAnalytics(for: .initEvent)
         sendAnalytics(for: .loading)
-        sendAnalytics(for: .metadata(""))
         setupObservers()
         setupNotifications()
         setupMetadataTracking()
@@ -249,6 +252,10 @@ public final class AVPlayerEventLogger: NSObject {
                 sendAnalytics(for: .loading)
             case .readyToPlay:
                 sendAnalytics(for: .loaded)
+                if !self.hasSentItemMetadata {
+                    self.hasSentItemMetadata = true
+                    sendAnalytics(for: .metadata(""))
+                }
             case .failed:
                 // A failed item is fatal: send the error, then end the session (EPAS: the
                 // `stopped` after an `error` SHOULD carry reason "error").
@@ -406,14 +413,13 @@ public final class AVPlayerEventLogger: NSObject {
                 duration: totalDuration)
 
         case .metadata(let info):
-            // Derive live/VOD from the current item rather than hardcoding false. Note: the
-            // metadata event is also sent from init before the item's duration is known; in
-            // that window `isLiveContent` falls back to false (VOD). The spec allows the
-            // server to handle `live` toggling from true to false, so a later, better-informed
-            // metadata event can correct an early conservative value.
+            // Derive live/VOD from the current item. The session's metadata is sent once the
+            // item is ready to play, when its duration (and so live/VOD) is known; before
+            // that an indefinite duration would read as live (#41). Without an item `live` is
+            // omitted rather than guessed.
             analytics.sendMetadataEvent(
-                isLive: isLiveContent,
-                contentTitle: info)
+                isLive: player.currentItem == nil ? nil : isLiveContent,
+                contentTitle: info.isEmpty ? nil : info)
 
         case .heartbeat:
             analytics.sendHeartbeatEvent(

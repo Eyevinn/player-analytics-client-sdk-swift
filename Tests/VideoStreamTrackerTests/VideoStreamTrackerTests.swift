@@ -220,3 +220,85 @@ final class DeviceTypeTests: XCTestCase {
         XCTAssertNotNil(fields["deviceType"])
     }
 }
+
+// MARK: - init first, metadata after the item is ready (#41)
+
+/// Answers each request after a delay taken from the request body's event name, and records
+/// the order in which responses complete.
+final class DelayedStubProtocol: URLProtocol {
+    nonisolated(unsafe) static var completed: [String] = []
+    nonisolated(unsafe) static var delays: [String: TimeInterval] = [:]
+    static let lock = NSLock()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let body = request.httpBody ?? request.httpBodyStream.map { stream -> Data in
+            stream.open(); defer { stream.close() }
+            var data = Data(); var buf = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable { let n = stream.read(&buf, maxLength: buf.count); if n <= 0 { break }; data.append(buf, count: n) }
+            return data
+        } ?? Data()
+        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let event = json?["event"] as? String ?? "?"
+        let delay = DelayedStubProtocol.delays[event] ?? 0
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+            DelayedStubProtocol.lock.lock(); DelayedStubProtocol.completed.append(event); DelayedStubProtocol.lock.unlock()
+            let response = HTTPURLResponse(url: self.request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+    override func stopLoading() {}
+}
+
+final class EventOrderTests: XCTestCase {
+    func testEventsReachTheSinkInTheOrderTheyWereLogged() {
+        DelayedStubProtocol.completed = []
+        DelayedStubProtocol.delays = ["init": 0.3]  // a slow init must still arrive first
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [DelayedStubProtocol.self]
+        let logger = EventSinkPlayerLogger(endpoint: URL(string: "https://sink.test/")!, session: URLSession(configuration: config))
+
+        logger.log(["event": "init"])
+        logger.log(["event": "loading"])
+        logger.log(["event": "metadata"])
+
+        let deadline = Date().addingTimeInterval(5)
+        while DelayedStubProtocol.completed.count < 3 && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(DelayedStubProtocol.completed, ["init", "loading", "metadata"])
+    }
+
+    func testInitIsFirstAndNoMetadataBeforeTheItemIsReady() {
+        let capture = CapturingLogger()
+        let tracker = AVPlayerEventLogger(player: AVPlayer(), logger: capture)
+        XCTAssertEqual(capture.events.first?["event"] as? String, "init")
+        XCTAssertTrue(capture.events(named: "metadata").isEmpty)
+        _ = tracker
+    }
+
+    func testMetadataOmitsUnknownValuesInsteadOfNull() throws {
+        let capture = CapturingLogger()
+        let sender = AnalyticsEventSender(logger: capture)
+        sender.sendMetadataEvent(isLive: nil, contentTitle: nil)
+        let event = try XCTUnwrap(capture.events(named: "metadata").first)
+        let payload = try XCTUnwrap(event["payload"] as? [String: Any])
+        XCTAssertNil(payload["live"])
+        XCTAssertNil(payload["contentTitle"])
+        let json = String(data: try JSONSerialization.data(withJSONObject: event), encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("null"), json)
+    }
+
+    func testMetadataReportsVODAndLive() throws {
+        let capture = CapturingLogger()
+        let sender = AnalyticsEventSender(logger: capture)
+        sender.sendMetadataEvent(isLive: AVPlayerEventLogger.isLiveStream(CMTime(seconds: 63, preferredTimescale: 600)), contentTitle: nil)
+        sender.sendMetadataEvent(isLive: AVPlayerEventLogger.isLiveStream(.indefinite), contentTitle: nil)
+        let lives = capture.events(named: "metadata").compactMap { ($0["payload"] as? [String: Any])?["live"] as? Bool }
+        XCTAssertEqual(lives, [false, true])
+    }
+}
