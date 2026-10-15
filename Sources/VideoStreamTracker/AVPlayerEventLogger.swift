@@ -56,7 +56,7 @@ public final class AVPlayerEventLogger: NSObject {
             case .seeked(let time):
                 return "Seek completed at: \(time.seconds) sec"
             case .bitrateChanged(let bitrate, let videoBitrate, let audioBitrate):
-                return "Bitrate Changed: \(bitrate) bps, video: \(videoBitrate) bps, audio: \(audioBitrate) bps"
+                return "Bitrate Changed: \(bitrate) bps, video: \(videoBitrate) bps, audio: \(audioBitrate) bps (sent as Kbps)"
             case .errorOccurred(let errorMsg):
                 return "Error: \(errorMsg)"
             case .warning(let warningMsg):
@@ -182,6 +182,14 @@ public final class AVPlayerEventLogger: NSObject {
 
     private var currentTimestamp: Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
+    }
+
+    /// Converts an AVFoundation bitrate (bits per second) to the Kbps integer EPAS expects
+    /// for `bitrate_changed`. Unknown values (AVFoundation reports negative numbers or NaN)
+    /// map to 0.
+    static func kbps(fromBps bps: Double) -> Int {
+        guard bps.isFinite, bps > 0 else { return 0 }
+        return Int((bps / 1000).rounded())
     }
 
     // MARK: - Initialization
@@ -426,7 +434,12 @@ public final class AVPlayerEventLogger: NSObject {
                 payload: payload)
 
         case .bitrateChanged(let bitrate, let videoBitrate, let audioBitrate):
-            let payload: [String: Any] = ["bitrate": bitrate, "videoBitrate": videoBitrate, "audioBitrate": audioBitrate]
+            // AVFoundation reports bits per second; EPAS `bitrate_changed` is in Kbps.
+            let payload: [String: Any] = [
+                "bitrate": AVPlayerEventLogger.kbps(fromBps: bitrate),
+                "videoBitrate": AVPlayerEventLogger.kbps(fromBps: videoBitrate),
+                "audioBitrate": AVPlayerEventLogger.kbps(fromBps: audioBitrate)
+            ]
             analytics.sendBitrateChangedEvent(
                 playhead: currentPlayhead,
                 duration: totalDuration,
@@ -484,7 +497,6 @@ public final class AVPlayerEventLogger: NSObject {
         #else
             let avgVideoBitrate = lastEvent.averageVideoBitrate
         #endif
-        let evt = lastEvent
         sendAnalytics(for: .bitrateChanged(bitrate: lastEvent.indicatedBitrate, videoBitrate: avgVideoBitrate, audioBitrate: avgAudioBitrate))
     }
 

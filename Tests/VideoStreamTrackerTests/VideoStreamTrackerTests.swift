@@ -184,3 +184,19 @@ final class PlayheadTests: XCTestCase {
         XCTAssertEqual(AVPlayerEventLogger.playheadMilliseconds(CMTime(seconds: 1.5, preferredTimescale: 600)), 1500)
     }
 }
+
+// MARK: - kbps (#43)
+
+final class BitrateConversionTests: XCTestCase {
+    func testKbpsConvertsAndRounds() {
+        XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: 649_048), 649)
+        XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: 3_306_586), 3307)
+        XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: 136_413.56), 136)
+    }
+
+    func testKbpsUnknownValuesMapToZero() {
+        XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: -1), 0)
+        XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: .nan), 0)
+        XCTAssertEqual(AVPlayerEventLogger.kbps(fromBps: .infinity), 0)
+    }
+}
