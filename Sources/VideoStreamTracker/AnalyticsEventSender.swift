@@ -185,13 +185,11 @@ internal final class AnalyticsEventSender {
                   duration: -1)
     }
 
-    func sendMetadataEvent(isLive: Bool, contentTitle: String?) {
-        
-        var payload: [String: Any] = [
-            "live": isLive,
-            "contentTitle": contentTitle as Any
-        ]
-        payload.merge(AnalyticsEventSender.deviceFields) { _, device in device }
+    func sendMetadataEvent(isLive: Bool?, contentTitle: String?) {
+        // Unknown values are omitted, not sent as null.
+        var payload: [String: Any] = AnalyticsEventSender.deviceFields
+        if let isLive { payload["live"] = isLive }
+        if let contentTitle { payload["contentTitle"] = contentTitle }
         sendEvent(eventType: .metadata,
                   timestamp: currentTimestamp,
                   playhead: 0,
