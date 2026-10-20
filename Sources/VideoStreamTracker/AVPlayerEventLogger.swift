@@ -17,7 +17,7 @@ public final class AVPlayerEventLogger: NSObject {
         case loaded
         case playing
         case paused
-        case stopped
+        case stopped(StopReason)
         case buffering
         case buffered
         case metadata(String)
@@ -41,8 +41,8 @@ public final class AVPlayerEventLogger: NSObject {
                 return "Playing"
             case .paused:
                 return "Paused"
-            case .stopped:
-                return "Stopped"
+            case .stopped(let reason):
+                return "Stopped: \(reason.rawValue)"
             case .buffering:
                 return "Buffering"
             case .buffered:
@@ -87,9 +87,20 @@ public final class AVPlayerEventLogger: NSObject {
     private var heartbeatTimer: Timer?
     private let heartbeatInterval: TimeInterval = 30.0
 
+    // Set once a `stopped` event has been sent, so a session never sends two.
+    private var hasStopped = false
+
     // Helper computed properties for analytics.
     private var currentPlayhead: Int64 {
-        Int64(player.currentTime().seconds * 1000)
+        AVPlayerEventLogger.playheadMilliseconds(player.currentTime())
+    }
+
+    /// EPAS playhead in milliseconds, `-1` when unknown. Without a current item
+    /// `currentTime()` is invalid and its seconds are NaN, which would trap in `Int64(_:)`.
+    static func playheadMilliseconds(_ time: CMTime) -> Int64 {
+        let seconds = time.seconds
+        guard seconds.isFinite else { return -1 }
+        return Int64(seconds * 1000)
     }
 
     private var totalDuration: Int64 {
@@ -180,9 +191,14 @@ public final class AVPlayerEventLogger: NSObject {
     /// - Parameters:
     ///   - player: The AVPlayer whose events will be tracked.
     ///   - eventSinkUrl: A URL to your Player Analytics Event sink
-    public init(player: AVPlayer, eventSinkUrl url: URL) {
+    public convenience init(player: AVPlayer, eventSinkUrl url: URL) {
+        self.init(player: player, logger: EventSinkPlayerLogger(endpoint: url))
+    }
+
+    /// Designated initializer; tests pass a capturing logger.
+    init(player: AVPlayer, logger: EventLogging) {
         self.player = player
-        self.analytics = AnalyticsEventSender(logger: EventSinkPlayerLogger(endpoint: url))
+        self.analytics = AnalyticsEventSender(logger: logger)
         super.init()
         // Log init event as soon as logger is created and also loading since we usually don't get that.
         sendAnalytics(for: .initEvent)
@@ -194,10 +210,21 @@ public final class AVPlayerEventLogger: NSObject {
     }
 
     deinit {
+        // Tearing down the logger before the item ended counts as the viewer leaving.
+        sendAnalytics(for: .stopped(.aborted))
         removeObservers()
     }
 
     // MARK: - Public API
+
+    /// Ends the tracked session. Call this when playback is stopped or torn down before the
+    /// item has played to the end; sends `stopped` with reason "aborted" unless the session
+    /// has already ended. Releasing the logger has the same effect.
+    public func stopTracking() {
+        stopHeartbeatTimer()
+        sendAnalytics(for: .stopped(.aborted))
+    }
+
     public func report(payload: [String: Any]?) {
         sendAnalytics(for: .metadata("Report: \(payload ?? [:])"))
         sendAnalytics(for: .report(payload))
@@ -215,8 +242,12 @@ public final class AVPlayerEventLogger: NSObject {
             case .readyToPlay:
                 sendAnalytics(for: .loaded)
             case .failed:
+                // A failed item is fatal: send the error, then end the session (EPAS: the
+                // `stopped` after an `error` SHOULD carry reason "error").
                 let errorMsg = player.currentItem?.error?.localizedDescription ?? "Unknown error"
                 sendAnalytics(for: .errorOccurred(errorMsg))
+                self.stopHeartbeatTimer()
+                sendAnalytics(for: .stopped(.error))
             default:
                 break
             }
@@ -348,11 +379,13 @@ public final class AVPlayerEventLogger: NSObject {
                 playhead: currentPlayhead,
                 duration: totalDuration)
 
-        case .stopped:
+        case .stopped(let reason):
+            guard !hasStopped else { return }
+            hasStopped = true
             analytics.sendStoppedEvent(
                 playhead: currentPlayhead,
                 duration: totalDuration,
-                reason: nil)
+                reason: reason)
 
         case .buffering:
             analytics.sendBufferingEvent(
@@ -427,7 +460,7 @@ public final class AVPlayerEventLogger: NSObject {
 
     @objc private func playbackDidEnd(notification: Notification) {
         stopHeartbeatTimer()
-        sendAnalytics(for: .stopped)
+        sendAnalytics(for: .stopped(.ended))
     }
 
     @objc private func timeJumped(_ notification: Notification) {

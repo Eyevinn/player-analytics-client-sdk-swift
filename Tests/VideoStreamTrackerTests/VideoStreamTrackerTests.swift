@@ -116,3 +116,71 @@ final class VideoStreamTrackerTests: XCTestCase {
         XCTAssertEqual(AVPlayerEventLogger.liveEdgeUTCMilliseconds(from: Date(timeIntervalSince1970: 0)), 0)
     }
 }
+
+// MARK: - Test helpers
+
+final class CapturingLogger: EventLogging {
+    var events: [[String: Any]] = []
+    func log(_ payload: [String: Any]) { events.append(payload) }
+    func events(named name: String) -> [[String: Any]] {
+        events.filter { $0["event"] as? String == name }
+    }
+}
+
+// MARK: - stopped reason (#40)
+
+final class StoppedReasonTests: XCTestCase {
+    func testStoppedCarriesStringReasonNeverNull() throws {
+        let capture = CapturingLogger()
+        let sender = AnalyticsEventSender(logger: capture)
+        sender.sendInitEvent(expectedStartTime: 0)
+        sender.sendLoadingEvent()
+        sender.sendLoadedEvent(playhead: 0, duration: 10_000)
+        sender.sendPlayingEvent(playhead: 0, duration: 10_000)
+        sender.sendStoppedEvent(playhead: 10_000, duration: 10_000, reason: .ended)
+
+        let stopped = try XCTUnwrap(capture.events(named: "stopped").last)
+        let payload = try XCTUnwrap(stopped["payload"] as? [String: Any])
+        XCTAssertEqual(payload["reason"] as? String, "ended")
+
+        // Serialised JSON must not contain a null reason.
+        let json = String(data: try JSONSerialization.data(withJSONObject: stopped), encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("null"), json)
+    }
+
+    func testStopReasonValuesMatchEPAS() {
+        XCTAssertEqual(StopReason.ended.rawValue, "ended")
+        XCTAssertEqual(StopReason.error.rawValue, "error")
+        XCTAssertEqual(StopReason.aborted.rawValue, "aborted")
+        XCTAssertEqual(StopReason.unknown.rawValue, "unknown")
+    }
+
+    func testStopTrackingSendsOneAbortedStopped() throws {
+        let capture = CapturingLogger()
+        var tracker: AVPlayerEventLogger? = AVPlayerEventLogger(player: AVPlayer(), logger: capture)
+        tracker?.stopTracking()
+        tracker?.stopTracking()
+        tracker = nil  // deinit must not send a second stopped
+
+        let stopped = capture.events(named: "stopped")
+        XCTAssertEqual(stopped.count, 1)
+        let payload = try XCTUnwrap(stopped.first?["payload"] as? [String: Any])
+        XCTAssertEqual(payload["reason"] as? String, "aborted")
+    }
+
+    func testReleasingTrackerSendsAbortedStopped() {
+        let capture = CapturingLogger()
+        var tracker: AVPlayerEventLogger? = AVPlayerEventLogger(player: AVPlayer(), logger: capture)
+        XCTAssertNotNil(tracker)
+        tracker = nil
+        XCTAssertEqual(capture.events(named: "stopped").count, 1)
+    }
+}
+
+final class PlayheadTests: XCTestCase {
+    func testUnknownPlayheadIsMinusOneNotACrash() {
+        XCTAssertEqual(AVPlayerEventLogger.playheadMilliseconds(.invalid), -1)
+        XCTAssertEqual(AVPlayerEventLogger.playheadMilliseconds(.indefinite), -1)
+        XCTAssertEqual(AVPlayerEventLogger.playheadMilliseconds(CMTime(seconds: 1.5, preferredTimescale: 600)), 1500)
+    }
+}
