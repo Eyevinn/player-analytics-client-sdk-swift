@@ -1,0 +1,77 @@
+name: build-test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: build-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build-test (${{ matrix.platform }})
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: iOS
+            device_prefix: iPhone
+          - platform: tvOS
+            device_prefix: Apple TV
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Simulator names and runtimes differ between runner images, so pick the
+      # destination at runtime: the first available device of the right kind on
+      # the newest runtime of the platform.
+      - name: Pick ${{ matrix.platform }} simulator
+        id: sim
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          DEVICE_PREFIX: ${{ matrix.device_prefix }}
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, os, sys
+          platform, prefix = os.environ["PLATFORM"], os.environ["DEVICE_PREFIX"]
+          devices = json.load(sys.stdin)["devices"]
+          def version(runtime):
+              tail = runtime.split(".")[-1]          # e.g. iOS-26-2
+              return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
+          runtimes = sorted((r for r in devices if f".SimRuntime.{platform}-" in r), key=version, reverse=True)
+          for runtime in runtimes:
+              for d in devices[runtime]:
+                  if d.get("isAvailable") and d["name"].startswith(prefix):
+                      print(d["udid"]); print(f"{d['\''name'\'']} ({runtime})", file=sys.stderr); sys.exit(0)
+          sys.exit(f"no available {prefix} simulator for {platform}")
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Test on ${{ matrix.platform }} Simulator
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme VideoStreamTracker \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath "TestResults-${{ matrix.platform }}.xcresult"
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults-${{ matrix.platform }}
+          path: TestResults-${{ matrix.platform }}.xcresult
+          if-no-files-found: ignore
