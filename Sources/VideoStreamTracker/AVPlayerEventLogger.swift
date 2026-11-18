@@ -94,6 +94,18 @@ public final class AVPlayerEventLogger: NSObject {
     /// tracking is off or the OS is older than iOS / tvOS 15.
     private(set) var sgaiAdTracking: SGAIAdTracking?
 
+    /// While an ad break plays, the main content's state changes are not the viewer's
+    /// experience (AVPlayer waits and jumps in time on the content), so they are not
+    /// sent; the ad's own play / pause / wait is sent instead (#54).
+    private var isInAdBreak: Bool { sgaiAdTracking?.isInAdBreak == true }
+    /// An ad must wait this long before it counts as buffering, so the short wait
+    /// between two ads in a break is not reported as a rebuffer.
+    static let adBufferingDelay: TimeInterval = 1.0
+    private var adBufferingWork: DispatchWorkItem?
+    private var adBufferingSent = false
+    /// A viewer pause during an ad was sent and not yet followed by `playing`.
+    private var adPauseSent = false
+
     private var heartbeatTimer: Timer?
     private let heartbeatInterval: TimeInterval = 30.0
 
@@ -243,7 +255,74 @@ public final class AVPlayerEventLogger: NSObject {
         let tracker = SGAIAdEventTracker(
             lookup: { [weak self] key in self?.trackingUrls(forAd: key) },
             pinger: pinger)
-        sgaiAdTracking = SGAIInterstitialAdapter(player: player, store: sgaiTrackingUrls, tracker: tracker)
+        let adapter = SGAIInterstitialAdapter(player: player, store: sgaiTrackingUrls, tracker: tracker)
+        adapter.onAdPlaybackChange = { [weak self] playback in self?.handleAdPlayback(playback) }
+        adapter.onAdBreakEnd = { [weak self] in self?.handleAdBreakEnd() }
+        sgaiAdTracking = adapter
+    }
+
+    /// The viewer's experience during an ad break, from the ad player (#54).
+    func handleAdPlayback(_ playback: SGAIAdPlayback) {
+        // Only changes are sent: the ad player reports `.playing` again at every ad in a
+        // break, and the session was already playing.
+        switch playback {
+        case .paused:
+            endAdBuffering()
+            guard !adPauseSent else { return }
+            adPauseSent = true
+            sendAnalytics(for: .paused)
+        case .playing:
+            cancelAdBufferingTimer()
+            guard adPauseSent || adBufferingSent else { return }
+            endAdBuffering()
+            adPauseSent = false
+            startHeartbeatTimer()
+            sendAnalytics(for: .playing)
+        case .waiting:
+            guard adBufferingWork == nil, !adBufferingSent else { return }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.adBufferingWork = nil
+                guard self.isInAdBreak else { return }
+                self.adBufferingSent = true
+                self.sendAnalytics(for: .buffering)
+            }
+            adBufferingWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.adBufferingDelay, execute: work)
+        }
+    }
+
+    private func cancelAdBufferingTimer() {
+        adBufferingWork?.cancel()
+        adBufferingWork = nil
+    }
+
+    /// After a break, bring the session back in line with the content: the content's own
+    /// state change at the break's end may have arrived while the break still counted.
+    private func handleAdBreakEnd() {
+        endAdBuffering()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isInAdBreak else { return }
+            switch self.player.timeControlStatus {
+            case .playing where self.adPauseSent:
+                self.adPauseSent = false
+                self.startHeartbeatTimer()
+                self.sendAnalytics(for: .playing)
+            case .paused where !self.adPauseSent:
+                self.adPauseSent = false
+                self.sendAnalytics(for: .paused)
+            default:
+                self.adPauseSent = false
+            }
+        }
+    }
+
+    /// Close a buffering period that started during an ad.
+    private func endAdBuffering() {
+        cancelAdBufferingTimer()
+        guard adBufferingSent else { return }
+        adBufferingSent = false
+        sendAnalytics(for: .buffered)
     }
 
     deinit {
@@ -323,6 +402,7 @@ public final class AVPlayerEventLogger: NSObject {
         timeControlStatusObservation = player.observe(\.timeControlStatus, options: [.new, .old]) {
             [weak self] player, _ in
             guard let self = self else { return }
+            if self.isInAdBreak { return }
             switch player.timeControlStatus {
             case .playing:
                 self.startHeartbeatTimer()
@@ -340,14 +420,14 @@ public final class AVPlayerEventLogger: NSObject {
         if let item = player.currentItem {
             bufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.new]) {
                 [weak self] item, change in
-                if let isEmpty = change.newValue, isEmpty {
+                if let isEmpty = change.newValue, isEmpty, self?.isInAdBreak != true {
                     self?.sendAnalytics(for: .buffering)
                 }
             }
 
             keepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) {
                 [weak self] item, change in
-                if let likelyToKeepUp = change.newValue, likelyToKeepUp {
+                if let likelyToKeepUp = change.newValue, likelyToKeepUp, self?.isInAdBreak != true {
                     self?.sendAnalytics(for: .buffered)
                 }
             }
@@ -534,7 +614,7 @@ public final class AVPlayerEventLogger: NSObject {
     }
 
     @objc private func timeJumped(_ notification: Notification) {
-        guard let item = notification.object as? AVPlayerItem else { return }
+        guard let item = notification.object as? AVPlayerItem, !isInAdBreak else { return }
         let currentTime = item.currentTime()
         sendAnalytics(for: .seeked(currentTime))
     }
