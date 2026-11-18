@@ -48,6 +48,24 @@ let logger = AVPlayerEventLogger(
     }
 }
 ```
+### SGAI ad tracking (opt-in)
+SGAI (Server-Guided Ad Insertion) ad tracking is off by default. Turn it on when you create the logger:
+```swift
+let logger = AVPlayerEventLogger(
+    player: player,
+    eventSinkUrl: URL(string: "https://eventsink.osaas.io")!,
+    enableSGAIAdTracking: true)
+```
+Tracking URLs are kept per ad, keyed `pod_<adBreakId>` for an ad break and `<adsId>_0_<index>` for an ad in it (the same keys as the Android SDK). You can read them, or set your own:
+```swift
+logger.setAdTrackingUrls(
+    ["impression": ["https://tracking.example.com/impression"],
+     "complete": ["https://tracking.example.com/complete"]],
+    forAd: "ad-session-1_0_0")
+let urls = logger.trackingUrls(forAd: "ad-session-1_0_0")
+```
+Firing the ad events from AVPlayer is not in this release yet ([#20](https://github.com/Eyevinn/player-analytics-client-sdk-swift/issues/20)); until then, enabling SGAI tracking does not send anything.
+
 ### Device fields
 Every `metadata` event carries two device fields:
 - `deviceType`: the device class: `mobile` (iPhone, iPod), `tablet` (iPad), `tv` (Apple TV) or `desktop` (an iOS app running on a Mac). Same vocabulary as the Web SDK. Omitted if the class cannot be determined.

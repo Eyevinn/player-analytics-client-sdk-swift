@@ -11,10 +11,11 @@
 //     key `pod_<adBreakId>`;
 //   - each asset's tracking is stored under `<adsId>_0_<index>`.
 //
-//  SCOPE (issue #19): fetch + parse into the model only. This type does NOT
-//  detect ad transitions or fire any tracking URL (issue #20) and exposes no
-//  public API (issue #21) — everything is `internal`. Networking is injected
-//  so parsing can be unit-tested from provided `Data` without a live fetch.
+//  SCOPE: fetch + parse into the model (issue #19), and store URLs set by the
+//  app through `AVPlayerEventLogger.setAdTrackingUrls(_:forAd:)` (issue #21).
+//  This type does NOT detect ad transitions or fire any tracking URL (issue
+//  #20). Networking is injected so parsing can be unit-tested from provided
+//  `Data` without a live fetch.
 //
 
 import Foundation
@@ -116,6 +117,15 @@ internal final class SGAIAdTrackingUrlsExtractor {
         }
 
         return adTrackingUrlsMap
+    }
+
+    // MARK: - Set by the app
+
+    /// Store tracking URLs for `adKey`, replacing any stored ones. Events with no
+    /// URLs are dropped; if nothing is left, the key is removed.
+    internal func setTrackingUrls(_ trackingMap: [String: [String]], forAd adKey: String) {
+        let cleaned = trackingMap.filter { !$0.value.isEmpty }
+        adTrackingUrlsMap[adKey] = cleaned.isEmpty ? nil : SGAIAdTrackingUrls(urlsByEvent: cleaned)
     }
 
     // MARK: - Lookup
