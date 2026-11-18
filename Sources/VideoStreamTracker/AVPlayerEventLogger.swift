@@ -518,7 +518,13 @@ public final class AVPlayerEventLogger: NSObject {
     public func seek(to time: CMTime, completion: ((Bool) -> Void)? = nil) {
         sendAnalytics(for: .seeking(time))
         player.seek(to: time) { [weak self] finished in
-            self?.sendAnalytics(for: .seeked(time))
+            guard let self else { completion?(finished); return }
+            self.sendAnalytics(for: .seeked(time))
+            // EPAS: a seek ends in `playing` when playback goes on. AVPlayer stays
+            // `.playing` through a seek, so no status change would send it (#56).
+            if self.player.timeControlStatus == .playing {
+                self.sendAnalytics(for: .playing)
+            }
             completion?(finished)
         }
     }
