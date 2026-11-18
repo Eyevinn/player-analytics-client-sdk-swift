@@ -13,16 +13,17 @@
 //
 //  SCOPE: fetch + parse into the model (issue #19), and store URLs set by the
 //  app through `AVPlayerEventLogger.setAdTrackingUrls(_:forAd:)` (issue #21).
-//  This type does NOT detect ad transitions or fire any tracking URL (issue
-//  #20). Networking is injected so parsing can be unit-tested from provided
-//  `Data` without a live fetch.
+//  This type does NOT detect ad transitions or fire any tracking URL; that is
+//  `SGAIAdEventTracker` and `SGAIInterstitialAdapter` (issue #20). Networking is
+//  injected so parsing can be unit-tested from provided `Data` without a live
+//  fetch. Not thread-safe: use it from the main thread.
 //
 
 import Foundation
 
 /// Abstraction over the network fetch of an asset-list URL, injected so tests
 /// can supply canned `Data` instead of performing a live request.
-internal protocol SGAIAssetListFetching {
+internal protocol SGAIAssetListFetching: Sendable {
     /// Fetch the raw bytes of the asset-list JSON at `url`.
     func fetch(url: URL) async throws -> Data
 }
@@ -73,12 +74,12 @@ internal final class SGAIAdTrackingUrlsExtractor {
     /// Fetch the asset list at `assetListUrl`, parse it, and store the extracted
     /// tracking URLs keyed by ad-break / asset. Returns the parsed model map.
     @discardableResult
-    internal func extractTrackingUrls(assetListUrl: String, adBreakId: String) async throws -> [String: SGAIAdTrackingUrls] {
+    internal func extractTrackingUrls(assetListUrl: String, adBreakId: String, adsId: String? = nil) async throws -> [String: SGAIAdTrackingUrls] {
         guard let url = URL(string: assetListUrl) else {
             throw ExtractionError.invalidAssetListUrl(assetListUrl)
         }
         let data = try await fetcher.fetch(url: url)
-        return try parse(assetListData: data, adBreakId: adBreakId)
+        return try parse(assetListData: data, adBreakId: adBreakId, adsId: adsId)
     }
 
     // MARK: - Parse-only (testable without networking)
@@ -86,9 +87,12 @@ internal final class SGAIAdTrackingUrlsExtractor {
     /// Parse a raw asset-list JSON `Data` and store the extracted tracking URLs.
     /// This is the networking-free entry point used by unit tests.
     @discardableResult
-    internal func parse(assetListData data: Data, adBreakId: String) throws -> [String: SGAIAdTrackingUrls] {
+    /// - Parameter adsId: Prefix for the per-asset keys (`<adsId>_0_<index>`). Defaults to
+    ///   ``currentAdsId``. The AVPlayer ad tracking (#20) passes the ad break's ID, so every
+    ///   break gets its own keys.
+    internal func parse(assetListData data: Data, adBreakId: String, adsId: String? = nil) throws -> [String: SGAIAdTrackingUrls] {
         let assetList = try JSONDecoder().decode(SGAIAssetList.self, from: data)
-        return process(assetList: assetList, adBreakId: adBreakId)
+        return process(assetList: assetList, adBreakId: adBreakId, adsId: adsId ?? currentAdsId)
     }
 
     /// Convenience overload that accepts a JSON string.
@@ -101,7 +105,7 @@ internal final class SGAIAdTrackingUrlsExtractor {
     /// Mirrors Android's `processAdResponse`: pod signaling first, then each
     /// asset by index. Empty tracking maps are skipped.
     @discardableResult
-    private func process(assetList: SGAIAssetList, adBreakId: String) -> [String: SGAIAdTrackingUrls] {
+    private func process(assetList: SGAIAssetList, adBreakId: String, adsId: String) -> [String: SGAIAdTrackingUrls] {
         // Pod-level tracking -> "pod_<adBreakId>".
         let podTracking = SGAIAdTrackingUrls.from(tracking: assetList.podSignaling?.payload.tracking)
         if !podTracking.isEmpty {
@@ -112,7 +116,7 @@ internal final class SGAIAdTrackingUrlsExtractor {
         for (index, asset) in assetList.assets.enumerated() {
             let assetTracking = SGAIAdTrackingUrls.from(tracking: asset.signaling?.payload.tracking)
             if !assetTracking.isEmpty {
-                adTrackingUrlsMap["\(currentAdsId)_0_\(index)"] = assetTracking
+                adTrackingUrlsMap["\(adsId)_0_\(index)"] = assetTracking
             }
         }
 

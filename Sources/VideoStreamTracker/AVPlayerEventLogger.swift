@@ -90,6 +90,10 @@ public final class AVPlayerEventLogger: NSObject {
     /// Holds the per-ad SGAI tracking URLs (parsed from asset lists, or set by the app).
     let sgaiTrackingUrls = SGAIAdTrackingUrlsExtractor()
 
+    /// Fires the SGAI ad events from AVPlayer's interstitials (#20); nil when SGAI
+    /// tracking is off or the OS is older than iOS / tvOS 15.
+    private(set) var sgaiAdTracking: SGAIAdTracking?
+
     private var heartbeatTimer: Timer?
     private let heartbeatInterval: TimeInterval = 30.0
 
@@ -210,14 +214,16 @@ public final class AVPlayerEventLogger: NSObject {
     ///   - eventSinkUrl: A URL to your Player Analytics Event sink
     ///   - enableSGAIAdTracking: Turn on SGAI (Server-Guided Ad Insertion) ad tracking.
     ///     Off by default, so existing integrations behave exactly as before. Mirrors the
-    ///     Android SDK's `enableSGAIAdTracking(...)`. The ad events themselves are fired by
-    ///     the SGAI event tracking (issue #20); until that ships, enabling this has no effect.
+    ///     Android SDK's `enableSGAIAdTracking(...)`. When on (iOS / tvOS 15 and later), the
+    ///     SDK follows AVPlayer's HLS interstitials and calls the ad's tracking URLs for
+    ///     podStart, impression, start, the quartiles, complete, pause, resume and podEnd.
     public convenience init(player: AVPlayer, eventSinkUrl url: URL, enableSGAIAdTracking: Bool = false) {
         self.init(player: player, logger: EventSinkPlayerLogger(endpoint: url), enableSGAIAdTracking: enableSGAIAdTracking)
     }
 
     /// Designated initializer; tests pass a capturing logger.
-    init(player: AVPlayer, logger: EventLogging, enableSGAIAdTracking: Bool = false) {
+    init(player: AVPlayer, logger: EventLogging, enableSGAIAdTracking: Bool = false,
+         sgaiPinger: SGAITrackingPinging = SGAIURLSessionPinger()) {
         self.player = player
         self.analytics = AnalyticsEventSender(logger: logger)
         self.isSGAIAdTrackingEnabled = enableSGAIAdTracking
@@ -229,12 +235,22 @@ public final class AVPlayerEventLogger: NSObject {
         setupObservers()
         setupNotifications()
         setupMetadataTracking()
+        if enableSGAIAdTracking { startSGAIAdTracking(pinger: sgaiPinger) }
+    }
+
+    private func startSGAIAdTracking(pinger: SGAITrackingPinging) {
+        guard #available(iOS 15.0, tvOS 15.0, *) else { return }
+        let tracker = SGAIAdEventTracker(
+            lookup: { [weak self] key in self?.trackingUrls(forAd: key) },
+            pinger: pinger)
+        sgaiAdTracking = SGAIInterstitialAdapter(player: player, store: sgaiTrackingUrls, tracker: tracker)
     }
 
     deinit {
         // Tearing down the logger before the item ended counts as the viewer leaving.
         sendAnalytics(for: .stopped(.aborted))
         removeObservers()
+        sgaiAdTracking?.invalidate()
     }
 
     // MARK: - Public API
@@ -244,6 +260,7 @@ public final class AVPlayerEventLogger: NSObject {
     /// has already ended. Releasing the logger has the same effect.
     public func stopTracking() {
         stopHeartbeatTimer()
+        sgaiAdTracking?.invalidate()
         sendAnalytics(for: .stopped(.aborted))
     }
 
