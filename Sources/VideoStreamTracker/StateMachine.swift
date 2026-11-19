@@ -8,126 +8,84 @@
 
 import Foundation
 
-/// The `StateMachine` class is responsible for managing the state of the player.
-/// It keeps track of the current state and transitions to the next state based on the event.
+/// Decides which events are sent, so the eventsink gets the EPAS event flow
+/// (player-analytics-specification `specification/README.md` and its flowchart).
 ///
-/// The reason for the looooong implementation of the logic is to make each step as clear as possible.
-/// Step 1. Based on the state the the StateMachine is in, is the state of the next step allowed? This you'll find in `currentStateAllows(_ nextEvent:)`.
-/// Step 2. Since athe next step is valid, what state should the StateMachine transition to? This you'll find in `nextStateBasedOn(_ nextEvent:)`.
+/// Two kinds of events:
+/// - **State events** (`init`, `loading`, `loaded`, `playing`, `paused`, `buffering`,
+///   `buffered`, `seeking`, `seeked`) are sent only when they are a valid next step from the
+///   current state, and then move the machine to that state. Anything else (a duplicate, or
+///   an event out of order) is dropped and the state stays as it is.
+/// - **Other events** (`heartbeat`, `metadata`, `bitrate_changed`, `warning`, `report`) are
+///   sent in every state, except after `stopped`, and never change the state.
+///
+/// `error` and `stopped` are always sent (until the session has stopped). `error` is fatal:
+/// after it only `stopped` and `report` are sent.
+///
+/// Before #56 the first event (`init`) moved the machine to `.error`, which allowed every
+/// event from then on, so nothing was ever filtered.
 internal final class StateMachine {
 
-    internal var currentState: SinkerEvent = .initEvent
+    internal private(set) var currentState: SinkerEvent = .initEvent
+    private var hasStarted = false
 
-    internal func handleEvent(nextEvent nextStep: SinkerEvent) -> Bool {
-
-        if currentStateAllows(nextStep) {
-            currentState = nextStateBasedOn(nextStep)
-            return true
-        } else {
-            return false
+    /// The events to send for `nextEvent`, in order, and updates the state. Usually
+    /// `[nextEvent]` or `[]`; `[.buffered, .playing]` when playback starts while buffering
+    /// without a `buffered` (AVPlayer goes from waiting straight to playing when a viewer
+    /// resumes), because EPAS closes a buffering period with `buffered` before `playing`.
+    internal func events(for nextEvent: SinkerEvent) -> [SinkerEvent] {
+        if nextEvent == .playing, currentState == .buffering {
+            currentState = .playing
+            return [.buffered, .playing]
         }
+        return handleEvent(nextEvent: nextEvent) ? [nextEvent] : []
     }
 
-    func nextStateBasedOn(_ nextEvent: SinkerEvent) -> SinkerEvent {
-        if nextEvent == .warning || nextEvent == .heartbeat || nextEvent == .metadata || nextEvent == .bitrateChanged {
-            return currentState
+    /// Returns true when `nextEvent` should be sent, and updates the state.
+    internal func handleEvent(nextEvent: SinkerEvent) -> Bool {
+        if currentState == .stopped {
+            // Nothing follows `stopped` except an app's own report.
+            return nextEvent == .report
         }
 
-
-        switch currentState {
-        case .initEvent:
-            if nextEvent == .loading || nextEvent == .loaded || nextEvent == .stopped {
-                return nextEvent
-            }
-        case .loading:
-            if nextEvent == .loaded || nextEvent == .buffering || nextEvent == .error {
-                return nextEvent
-            }
-        case .loaded:
-            if nextEvent == .playing || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking  {
-                return nextEvent
-            }
-        case .playing:
-            if nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped {
-                return nextEvent
-            }
-        case .error:
-            return currentState
+        switch nextEvent {
+        case .heartbeat, .metadata, .bitrateChanged, .warning, .report:
+            return currentState != .error || nextEvent == .report
         case .stopped:
-            if nextEvent == .initEvent {
-                return nextEvent
-            } else {
-                return currentState
-            }
-        case .seeking:
-            if nextEvent == .seeked || nextEvent == .paused {
-                return nextEvent
-            }
-        case .seeked:
-            if nextEvent == .playing || nextEvent == .paused {
-                return nextEvent
-            }
-        case .buffering:
-            if nextEvent == .buffered {
-                return nextEvent
-            } else if nextEvent == .error {
-                return nextEvent
-            }
-        case .buffered:
-            if nextEvent == .playing || nextEvent == .seeking || nextEvent == .paused {
-                return nextEvent
-            }
-        case .paused:
-            if nextEvent == .playing || nextEvent == .buffering {
-                return nextEvent
-            }
-        case .report:
-            return currentState
+            currentState = .stopped
+            return true
+        case .error:
+            currentState = .error
+            return true
         default:
-            return .error
+            break
         }
 
-        return .error   // Something is major-wrong so report error.
+        guard let next = Self.transitions[currentState]?[nextEvent] else { return false }
+        if nextEvent == .initEvent {
+            // `init` MUST be sent once per session.
+            guard !hasStarted else { return false }
+            hasStarted = true
+        }
+        currentState = next
+        return true
     }
 
-    func currentStateAllows(_ nextEvent: SinkerEvent) -> Bool {
-        if nextEvent == .error || nextEvent == .stopped || nextEvent == .warning ||  nextEvent == .heartbeat || nextEvent == .metadata {
-            return true
-        }
-
-        switch currentState {
-        case .initEvent:
-            return nextEvent == .loading || nextEvent == .loaded || nextEvent == .initEvent
-        case .loading:
-            return nextEvent == .loaded || nextEvent == .buffering
-        case .loaded:
-            return nextEvent == .playing || nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .report
-        case .playing:
-            return nextEvent == .paused || nextEvent == .buffering || nextEvent == .seeking || nextEvent == .stopped || nextEvent == .report
-        case .heartbeat:
-            return true
-        case .error:
-            return true
-        case .stopped:
-            return nextEvent == .initEvent || nextEvent == .report
-        case .seeking:
-            return nextEvent == .seeked || nextEvent == .paused || nextEvent == .report
-        case .seeked:
-            return nextEvent == .playing || nextEvent == .paused || nextEvent == .report
-        case .buffering:
-            return nextEvent == .buffered || nextEvent == .seeking || nextEvent == .stopped || nextEvent == .report
-        case .buffered:
-            return nextEvent == .playing || nextEvent == .seeking || nextEvent == .paused || nextEvent == .report
-        case .bitrateChanged:
-            return true
-        case .warning:
-            return true
-        case .paused:
-            return nextEvent == .playing || nextEvent == .buffering || nextEvent == .report
-        case .metadata:
-            return true
-        case .report:
-            return true
-        }
-    }
+    /// Valid state events per state, and the state each one moves to.
+    private static let transitions: [SinkerEvent: [SinkerEvent: SinkerEvent]] = [
+        // `init` first; then the content is attached (`loading`) or already loaded.
+        .initEvent: [.initEvent: .initEvent, .loading: .loading, .loaded: .loaded],
+        // EPAS: buffering while loading is ignored.
+        .loading: [.loaded: .loaded],
+        // Before the first `playing`, buffering is still part of loading.
+        .loaded: [.playing: .playing, .paused: .paused, .seeking: .seeking],
+        .playing: [.paused: .paused, .buffering: .buffering, .seeking: .seeking],
+        .paused: [.playing: .playing, .buffering: .buffering, .seeking: .seeking],
+        // EPAS: `playing` only after `buffered`; a seek can interrupt buffering.
+        .buffering: [.buffered: .buffered, .seeking: .seeking, .paused: .paused],
+        .buffered: [.playing: .playing, .paused: .paused, .seeking: .seeking, .buffering: .buffering],
+        // EPAS: `playing` only after `seeked`.
+        .seeking: [.seeked: .seeked],
+        .seeked: [.playing: .playing, .paused: .paused, .buffering: .buffering, .seeking: .seeking],
+    ]
 }

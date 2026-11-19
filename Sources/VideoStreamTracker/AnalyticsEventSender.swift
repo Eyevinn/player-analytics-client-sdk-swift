@@ -149,18 +149,20 @@ internal final class AnalyticsEventSender {
                    duration: Int64,
                    payload: [String: Any]? = nil) {
 
-        if stateMachine.handleEvent(nextEvent: eventType ) {
-
-
+        let toSend = stateMachine.events(for: eventType)
+        if toSend.isEmpty {
+            print("============Event \(eventType) not allowed in state \(stateMachine.currentState)")
+        }
+        for sendType in toSend {
             var event: [String: Any] = [
-                "event": eventType.description,
+                "event": sendType.description,
                 "sessionId": sessionId,
                 "timestamp": timestamp,
                 "playhead": playhead,
                 "duration": duration
             ]
 
-            if let payload {
+            if sendType == eventType, let payload {
                 event["payload"] = payload
             }
 
@@ -172,9 +174,6 @@ internal final class AnalyticsEventSender {
             }
 
             sendToEventSink(event: event)
-        }
-        else {
-            print("============Event \(eventType) not allowed in state \(stateMachine.currentState)")
         }
     }
 
