@@ -20,7 +20,7 @@ public final class AVPlayerEventLogger: NSObject {
         case stopped(StopReason)
         case buffering
         case buffered
-        case metadata(String)
+        case metadata
         case heartbeat
         case seeking(CMTime)
         case seeked(CMTime)
@@ -47,8 +47,8 @@ public final class AVPlayerEventLogger: NSObject {
                 return "Buffering"
             case .buffered:
                 return "Buffered"
-            case .metadata(let info):
-                return "Metadata received: \(info)"
+            case .metadata:
+                return "Metadata"
             case .heartbeat:
                 return "Heartbeat"
             case .seeking(let time):
@@ -114,6 +114,12 @@ public final class AVPlayerEventLogger: NSObject {
 
     // The session's metadata is sent once, when the item is ready to play.
     private var hasSentItemMetadata = false
+
+    /// What is playing, as set by the app (#62); sent in every `metadata` event.
+    private var contentId: String?
+    private var contentTitle: String?
+    /// An IANA time zone to send instead of the device's own (#64); nil = device time zone.
+    private var timeZoneOverride: String?
 
     // Helper computed properties for analytics.
     private var currentPlayhead: Int64 {
@@ -229,16 +235,24 @@ public final class AVPlayerEventLogger: NSObject {
     ///     Android SDK's `enableSGAIAdTracking(...)`. When on (iOS / tvOS 15 and later), the
     ///     SDK follows AVPlayer's HLS interstitials and calls the ad's tracking URLs for
     ///     podStart, impression, start, the quartiles, complete, pause, resume and podEnd.
-    public convenience init(player: AVPlayer, eventSinkUrl url: URL, enableSGAIAdTracking: Bool = false) {
-        self.init(player: player, logger: EventSinkPlayerLogger(endpoint: url), enableSGAIAdTracking: enableSGAIAdTracking)
+    ///   - contentId: Your ID for what is playing, sent as `contentId` (#62). Optional.
+    ///   - contentTitle: The title of what is playing, sent as `contentTitle`; the dashboard's
+    ///     Content breakdown shows it (#62). Optional. Use ``setContent(id:title:)`` when the item changes.
+    public convenience init(player: AVPlayer, eventSinkUrl url: URL, contentId: String? = nil,
+                            contentTitle: String? = nil, enableSGAIAdTracking: Bool = false) {
+        self.init(player: player, logger: EventSinkPlayerLogger(endpoint: url), contentId: contentId,
+                  contentTitle: contentTitle, enableSGAIAdTracking: enableSGAIAdTracking)
     }
 
     /// Designated initializer; tests pass a capturing logger.
-    init(player: AVPlayer, logger: EventLogging, enableSGAIAdTracking: Bool = false,
+    init(player: AVPlayer, logger: EventLogging, contentId: String? = nil, contentTitle: String? = nil,
+         enableSGAIAdTracking: Bool = false,
          sgaiPinger: SGAITrackingPinging = SGAIURLSessionPinger()) {
         self.player = player
         self.analytics = AnalyticsEventSender(logger: logger)
         self.isSGAIAdTrackingEnabled = enableSGAIAdTracking
+        self.contentId = contentId
+        self.contentTitle = contentTitle
         super.init()
         // Log init event as soon as logger is created and also loading since we usually don't get that.
         // Metadata waits until the item is ready to play, when live/VOD is known (#41).
@@ -343,9 +357,25 @@ public final class AVPlayerEventLogger: NSObject {
         sendAnalytics(for: .stopped(.aborted))
     }
 
+    /// Sends your own `report` event. It no longer also sends a `metadata` event whose title is
+    /// "Report: ...": that overwrote the content title the dashboard shows (#62).
     public func report(payload: [String: Any]?) {
-        sendAnalytics(for: .metadata("Report: \(payload ?? [:])"))
         sendAnalytics(for: .report(payload))
+    }
+
+    /// Sets what is playing (#62), for example when the player moves to a new item. The values go
+    /// into every `metadata` event from now on; if the session's metadata was already sent, a new
+    /// `metadata` event is sent at once. Pass nil to stop sending a field.
+    public func setContent(id: String?, title: String?) {
+        contentId = id
+        contentTitle = title
+        if hasSentItemMetadata { sendAnalytics(for: .metadata) }
+    }
+
+    /// Sends this IANA time zone (e.g. "Europe/Stockholm") instead of the device's own, from the
+    /// next `metadata` event on (#64). Pass nil to go back to the device time zone.
+    public func setTimeZone(_ identifier: String?) {
+        timeZoneOverride = identifier
     }
 
     // MARK: - SGAI ad tracking URLs
@@ -384,7 +414,7 @@ public final class AVPlayerEventLogger: NSObject {
                 sendAnalytics(for: .loaded)
                 if !self.hasSentItemMetadata {
                     self.hasSentItemMetadata = true
-                    sendAnalytics(for: .metadata(""))
+                    sendAnalytics(for: .metadata)
                 }
             case .failed:
                 // A failed item is fatal: send the error, then end the session (EPAS: the
@@ -576,14 +606,16 @@ public final class AVPlayerEventLogger: NSObject {
                 playhead: currentPlayhead,
                 duration: totalDuration)
 
-        case .metadata(let info):
+        case .metadata:
             // Derive live/VOD from the current item. The session's metadata is sent once the
             // item is ready to play, when its duration (and so live/VOD) is known; before
             // that an indefinite duration would read as live (#41). Without an item `live` is
             // omitted rather than guessed.
             analytics.sendMetadataEvent(
                 isLive: player.currentItem == nil ? nil : isLiveContent,
-                contentTitle: info.isEmpty ? nil : info)
+                contentTitle: contentTitle,
+                contentId: contentId,
+                timeZone: timeZoneOverride)
 
         case .heartbeat:
             analytics.sendHeartbeatEvent(
@@ -722,14 +754,11 @@ extension AVPlayerEventLogger: @preconcurrency AVPlayerItemMetadataOutputPushDel
         didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup],
         from track: AVPlayerItemTrack?
     ) {
-        // Example: Log metadata events.
-        for group in groups {
-            for metadataItem in group.items {
-                if let value = metadataItem.value(forKey: "value") {
-                    sendAnalytics(for: .metadata("\(value)"))
-                }
-            }
-        }
+        // Timed metadata from the stream (ID3 and similar) used to be sent as a `metadata`
+        // event with the tag's value as `contentTitle`, which overwrote the title set by the
+        // app and the dashboard's Content breakdown (#62). It is no longer sent; the session's
+        // metadata comes from `setContent(id:title:)` and the device fields.
+        _ = groups
     }
 }
 

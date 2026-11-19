@@ -76,10 +76,24 @@ let urls = logger.trackingUrls(forAd: "break-1_0_0")
 ```
 Note that a break's asset list, when it loads, replaces URLs set for that break's keys.
 
-### Device fields
-Every `metadata` event carries two device fields:
+### Content, device and time zone fields
+Tell the SDK what is playing, so the dashboard can break numbers down by title:
+```swift
+let logger = AVPlayerEventLogger(
+    player: player,
+    eventSinkUrl: URL(string: "https://eventsink.osaas.io")!,
+    contentId: "vinn-1",
+    contentTitle: "VINN")
+
+// When the player moves to another item:
+logger.setContent(id: "next-2", title: "Next episode")
+```
+Every `metadata` event carries:
+- `contentId`, `contentTitle`: as set above; omitted when not set.
 - `deviceType`: the device class: `mobile` (iPhone, iPod), `tablet` (iPad), `tv` (Apple TV) or `desktop` (an iOS app running on a Mac). Same vocabulary as the Web SDK. Omitted if the class cannot be determined.
 - `deviceModel`: the model identifier, e.g. `iPhone18,1` or `AppleTV14,1`. On a simulator this is the simulated model, not the host CPU.
+- `platform`: `iOS`, `iPadOS` or `tvOS`.
+- `timeZone`: the device's IANA time zone (e.g. `Europe/Stockholm`), from which hosted Open Analytics derives the country. Send another with `logger.setTimeZone("...")`.
 
 ### Demo project
 There is a demo-project included in the repository. You can run it by opening the `EPAS_Demo.xcodeproj` file in Xcode. The demo project is a simple SwiftUI app that uses the SDK to send events to the Eyevinn Player Analytics Eventsink.

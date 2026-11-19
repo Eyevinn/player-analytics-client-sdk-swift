@@ -120,16 +120,27 @@ internal final class AnalyticsEventSender {
         return nil
     }
 
-    /// `deviceType` and `deviceModel` for the metadata payload.
+    /// The platform the app runs on (#65): `tvOS` on Apple TV, `iPadOS` on an iPad,
+    /// otherwise `iOS` (iPhone, iPod, or an iOS app on a Mac). Lets the dashboard split
+    /// plays by platform as well as by device type.
+    static internal func platform(forModelIdentifier identifier: String) -> String {
+        if identifier.hasPrefix("AppleTV") { return "tvOS" }
+        if identifier.hasPrefix("iPad") { return "iPadOS" }
+        return "iOS"
+    }
+
+    /// `deviceType`, `deviceModel` and `platform` for the metadata payload.
     static internal var deviceFields: [String: Any] {
         let model = modelIdentifier
         var fields: [String: Any] = ["deviceModel": model]
         #if os(tvOS)
         fields["deviceType"] = "tv"
+        fields["platform"] = "tvOS"
         #else
         if let type = deviceType(forModelIdentifier: model) {
             fields["deviceType"] = type
         }
+        fields["platform"] = platform(forModelIdentifier: model)
         #endif
         return fields
     }
@@ -184,11 +195,19 @@ internal final class AnalyticsEventSender {
                   duration: -1)
     }
 
-    func sendMetadataEvent(isLive: Bool?, contentTitle: String?) {
+    /// - Parameters:
+    ///   - contentId, contentTitle: what is playing, as set by the app (#62); omitted when nil.
+    ///   - timeZone: an IANA time zone to send instead of the device's own (#64).
+    func sendMetadataEvent(isLive: Bool?, contentTitle: String?, contentId: String? = nil,
+                           timeZone: String? = nil) {
         // Unknown values are omitted, not sent as null.
         var payload: [String: Any] = AnalyticsEventSender.deviceFields
         if let isLive { payload["live"] = isLive }
         if let contentTitle { payload["contentTitle"] = contentTitle }
+        if let contentId { payload["contentId"] = contentId }
+        // The device's IANA time zone, from which hosted Open Analytics derives the
+        // country, as the Web SDK sends it (#64).
+        payload["timeZone"] = timeZone ?? TimeZone.current.identifier
         sendEvent(eventType: .metadata,
                   timestamp: currentTimestamp,
                   playhead: 0,
