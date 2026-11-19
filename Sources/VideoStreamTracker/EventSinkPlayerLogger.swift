@@ -24,6 +24,11 @@ public final class EventSinkPlayerLogger: EventLogging {
     private let sendQueue = DispatchQueue(label: "VideoStreamTracker.EventSinkPlayerLogger")
     private let requestTimeout: TimeInterval = 10
 
+    /// Whether events carry the EPAS `sdk` field. Set from the `init` response's
+    /// `epasVersion` (#57). Because events are posted one at a time, the `init` response is
+    /// in before the next event is built, so every event after `init` gets the right answer.
+    private let sdkGate = SDKGate()
+
     struct AnalyticsResponse: Codable {
         let sessionId: String
         let heartbeatInterval: Int
@@ -42,25 +47,36 @@ public final class EventSinkPlayerLogger: EventLogging {
     // Tries to send the payload to the endpoint.
     // Only reports to the debug-log if something goes wrong.
     public func log(_ payload: [String: Any]) {
-        var request = URLRequest(url: endpointURL, timeoutInterval: requestTimeout)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
-
-        do {
-            let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
-            request.httpBody = jsonData
-        } catch {
-            print("Error serializeing JSONO: \(error)")
+        guard JSONSerialization.isValidJSONObject(payload) else {
+            print("Error serializing JSON: invalid payload \(payload)")
             return
         }
-
         let session = self.session
         let timeout = requestTimeout
+        let endpointURL = self.endpointURL
+        let gate = sdkGate
+        let isInit = payload["event"] as? String == "init"
+        // `[String: Any]` is not Sendable; the payload is only read on the send queue.
+        nonisolated(unsafe) let payload = payload
         sendQueue.async {
+            var body = payload
+            if gate.sendsSdk {
+                body["sdk"] = ["name": SDKInfo.name, "version": SDKInfo.version]
+            }
+            var request = URLRequest(url: endpointURL, timeoutInterval: timeout)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+            } catch {
+                print("Error serializing JSON: \(error)")
+                return
+            }
+
             let done = DispatchSemaphore(value: 0)
             let task = session.dataTask(with: request) { data, response, error in
                 defer { done.signal() }
+                if isInit { gate.update(fromInitResponse: data, response: response) }
                 EventSinkPlayerLogger.report(data: data, response: response, error: error)
             }
             task.resume()
@@ -101,5 +117,26 @@ public final class EventSinkPlayerLogger: EventLogging {
         } catch {
             print ("Error decoding response JSON: \(error) from data: \(data)")
         }
+    }
+}
+
+/// Holds the `sdk` decision; written from the `init` response, read on the send queue.
+final class SDKGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _sendsSdk = false
+
+    var sendsSdk: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _sendsSdk
+    }
+
+    /// Turns `sdk` on only when the eventsink answered `init` with HTTP 2xx and an
+    /// `epasVersion` of at least `SDKInfo.minimumEpasVersionForSdk`; otherwise leaves it off.
+    func update(fromInitResponse data: Data?, response: URLResponse?) {
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              let data,
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        let on = SDKInfo.isVersion(json["epasVersion"], atLeast: SDKInfo.minimumEpasVersionForSdk)
+        lock.lock(); _sendsSdk = on; lock.unlock()
     }
 }

@@ -325,12 +325,14 @@ public final class AVPlayerEventLogger: NSObject {
             guard let self = self else { return }
             switch player.timeControlStatus {
             case .playing:
+                self.cancelPendingBuffering()
                 self.startHeartbeatTimer()
                 sendAnalytics(for: .playing)
             case .paused:
+                self.cancelPendingBuffering()
                 sendAnalytics(for: .paused)
             case .waitingToPlayAtSpecifiedRate:
-                sendAnalytics(for: .buffering)
+                self.handleWaiting(item: player.currentItem)
             @unknown default:
                 break
             }
@@ -352,6 +354,37 @@ public final class AVPlayerEventLogger: NSObject {
                 }
             }
         }
+    }
+
+    /// AVPlayer waits briefly (about 20 ms, buffer full) every time playback resumes, and
+    /// reports it as `.waitingToPlayAtSpecifiedRate`. That is not buffering. Report
+    /// `buffering` only when playback is waiting for data: the buffer is empty or not likely
+    /// to keep up, or the wait lasts longer than `bufferingGracePeriod` (#59).
+    static let bufferingGracePeriod: TimeInterval = 1.0
+    private var pendingBuffering: DispatchWorkItem?
+
+    private func handleWaiting(item: AVPlayerItem?) {
+        let waitingForData = item.map { $0.isPlaybackBufferEmpty || !$0.isPlaybackLikelyToKeepUp } ?? true
+        if waitingForData {
+            cancelPendingBuffering()
+            sendAnalytics(for: .buffering)
+            return
+        }
+        guard pendingBuffering == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingBuffering = nil
+            if self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                self.sendAnalytics(for: .buffering)
+            }
+        }
+        pendingBuffering = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.bufferingGracePeriod, execute: work)
+    }
+
+    private func cancelPendingBuffering() {
+        pendingBuffering?.cancel()
+        pendingBuffering = nil
     }
 
     // MARK: - Setup Notifications
@@ -569,7 +602,13 @@ public final class AVPlayerEventLogger: NSObject {
     public func seek(to time: CMTime, completion: ((Bool) -> Void)? = nil) {
         sendAnalytics(for: .seeking(time))
         player.seek(to: time) { [weak self] finished in
-            self?.sendAnalytics(for: .seeked(time))
+            guard let self else { completion?(finished); return }
+            self.sendAnalytics(for: .seeked(time))
+            // EPAS: a seek ends in `playing` when playback goes on. AVPlayer stays
+            // `.playing` through a seek, so no status change would send it (#56).
+            if self.player.timeControlStatus == .playing {
+                self.sendAnalytics(for: .playing)
+            }
             completion?(finished)
         }
     }
