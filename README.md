@@ -49,22 +49,32 @@ let logger = AVPlayerEventLogger(
 }
 ```
 ### SGAI ad tracking (opt-in)
-SGAI (Server-Guided Ad Insertion) ad tracking is off by default. Turn it on when you create the logger:
+SGAI (Server-Guided Ad Insertion) ad tracking is off by default. Turn it on when you create the logger (iOS / tvOS 15 and later):
 ```swift
 let logger = AVPlayerEventLogger(
     player: player,
     eventSinkUrl: URL(string: "https://eventsink.osaas.io")!,
     enableSGAIAdTracking: true)
 ```
-Tracking URLs are kept per ad, keyed `pod_<adBreakId>` for an ad break and `<adsId>_0_<index>` for an ad in it (the same keys as the Android SDK). You can read them, or set your own:
+The SDK then follows the ad breaks AVPlayer plays as HLS interstitials (`#EXT-X-DATERANGE` with `CLASS="com.apple.hls.interstitial"` and `X-ASSET-LIST`), reads the tracking URLs from each break's asset list (`X-AD-CREATIVE-SIGNALING`), and calls them as the ads play:
+
+| Event | When |
+|---|---|
+| `podStart` / `podEnd` | The ad break starts / ends |
+| `impression`, `start` | An ad starts playing |
+| `firstQuartile`, `midpoint`, `thirdQuartile` | 25 %, 50 %, 75 % of the ad |
+| `complete` | The ad plays to its end |
+| `pause`, `resume` | The viewer pauses / resumes during an ad |
+
+Each tracking URL gets a `GET` with an `X-Ad-Key` header, the same as the Android SDK. Tracking URLs are kept per ad, keyed `pod_<breakId>` for the break and `<breakId>_0_<index>` for its ads, where `breakId` is the `EXT-X-DATERANGE` `ID`. You can read them, or set your own before the break plays:
 ```swift
 logger.setAdTrackingUrls(
     ["impression": ["https://tracking.example.com/impression"],
      "complete": ["https://tracking.example.com/complete"]],
-    forAd: "ad-session-1_0_0")
-let urls = logger.trackingUrls(forAd: "ad-session-1_0_0")
+    forAd: "break-1_0_0")
+let urls = logger.trackingUrls(forAd: "break-1_0_0")
 ```
-Firing the ad events from AVPlayer is not in this release yet ([#20](https://github.com/Eyevinn/player-analytics-client-sdk-swift/issues/20)); until then, enabling SGAI tracking does not send anything.
+Note that a break's asset list, when it loads, replaces URLs set for that break's keys.
 
 ### Device fields
 Every `metadata` event carries two device fields:
