@@ -25,9 +25,23 @@
 import AVFoundation
 import Foundation
 
+/// What the viewer sees happen to an ad while it plays (issue #54).
+internal enum SGAIAdPlayback {
+    case playing
+    case paused
+    case waiting
+}
+
 /// Lets the logger hold the adapter without an availability check.
 internal protocol SGAIAdTracking: AnyObject {
     func invalidate()
+    /// True while an ad break is on screen; the main content's own state changes
+    /// (it waits and jumps in time during the break) are then not real.
+    var isInAdBreak: Bool { get }
+    /// Called with the ad's play / pause / wait state while a break plays.
+    var onAdPlaybackChange: ((SGAIAdPlayback) -> Void)? { get set }
+    /// Called when an ad break ends.
+    var onAdBreakEnd: (() -> Void)? { get set }
 }
 
 /// All state is read and written on the main thread (observers are delivered on, or
@@ -56,6 +70,16 @@ internal final class SGAIInterstitialAdapter: NSObject, SGAIAdTracking, AVPlayer
     private var notificationTokens: [NSObjectProtocol] = []
     private var timeObserver: Any?
     private var isInvalidated = false
+
+    internal var onAdPlaybackChange: ((SGAIAdPlayback) -> Void)?
+    internal var onAdBreakEnd: (() -> Void)?
+
+    /// A break counts from when its first ad plays (the interstitial player can start a
+    /// little before `currentEvent` is set) until `currentEvent` is nil again.
+    internal var isInAdBreak: Bool {
+        activeBreakId != nil || monitor.currentEvent != nil
+            || monitor.interstitialPlayer.timeControlStatus == .playing
+    }
 
     /// How close to its end a pause still counts as the ad finishing, not the viewer pausing.
     private static let endOfAdTolerance = 0.3
@@ -146,6 +170,7 @@ internal final class SGAIInterstitialAdapter: NSObject, SGAIAdTracking, AVPlayer
         if activeBreakId != nil {
             if lastAdFraction >= 0.9 { tracker.adCompleted() }
             tracker.breakEnded()
+            onAdBreakEnd?()
         }
         activeBreakId = id
         lastAdFraction = 0
@@ -177,10 +202,17 @@ internal final class SGAIInterstitialAdapter: NSObject, SGAIAdTracking, AVPlayer
         case .playing:
             startAdIfPlaying()
             tracker.adResumed()
+            onAdPlaybackChange?(.playing)
         case .paused:
-            if let item = interstitialPlayer.currentItem, Self.isAtEnd(item) { return }
+            // The ad player also stops when an ad (or the whole break) finishes; that is
+            // not the viewer pausing.
+            guard let item = interstitialPlayer.currentItem, !Self.isAtEnd(item),
+                  lastAdFraction < 0.95 else { return }
             tracker.adPaused()
-        default:
+            onAdPlaybackChange?(.paused)
+        case .waitingToPlayAtSpecifiedRate:
+            onAdPlaybackChange?(.waiting)
+        @unknown default:
             break
         }
     }

@@ -13,6 +13,7 @@ import XCTest
 final class RecordingPinger: SGAITrackingPinging, @unchecked Sendable {
     private let lock = NSLock()
     private var _pings: [(event: String, adKey: String, url: String)] = []
+    private var _times: [Date] = []
     private let forward: SGAITrackingPinging?
 
     init(forwardTo forward: SGAITrackingPinging? = nil) { self.forward = forward }
@@ -22,12 +23,19 @@ final class RecordingPinger: SGAITrackingPinging, @unchecked Sendable {
         return _pings
     }
 
+    /// When each ping was made, in firing order.
+    var times: [Date] {
+        lock.lock(); defer { lock.unlock() }
+        return _times
+    }
+
     /// "adKey:event" in firing order.
     var trace: [String] { pings.map { "\($0.adKey):\($0.event)" } }
 
     func ping(_ url: URL, event: SGAIAdTrackingEvent, adKey: String) {
         lock.lock()
         _pings.append((event.eventName, adKey, url.absoluteString))
+        _times.append(Date())
         lock.unlock()
         forward?.ping(url, event: event, adKey: adKey)
     }
@@ -252,5 +260,63 @@ final class SGAIEndToEndTests: XCTestCase {
         XCTAssertEqual(trace.filter { $0 == "\(ad0):resume" }.count, 1)
         XCTAssertFalse(trace.contains("\(ad1):pause"))
         XCTAssertLessThan(trace.firstIndex(of: "\(ad0):complete")!, trace.firstIndex(of: "\(ad1):impression")!)
+    }
+}
+
+/// Content events during a real ad break (issue #54). Runs only with `SGAI_E2E_URL` set,
+/// against the same stream as `SGAIEndToEndTests`.
+final class SGAIContentDuringAdBreakTests: XCTestCase {
+
+    func testBreakIsNotReportedAsSeekOrRebufferAndAPauseInAnAdIsAPause() throws {
+        guard let urlString = ProcessInfo.processInfo.environment["SGAI_E2E_URL"],
+              let url = URL(string: urlString) else {
+            throw XCTSkip("Set SGAI_E2E_URL to a local SGAI stream to run this test")
+        }
+        let capture = CapturingLogger()
+        let pinger = RecordingPinger()
+        let player = AVPlayer(url: url)
+        player.isMuted = true
+        let logger = AVPlayerEventLogger(player: player, logger: capture, enableSGAIAdTracking: true, sgaiPinger: pinger)
+        player.play()
+
+        let paused = expectation(description: "paused during ad")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9) {
+            player.pause()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                player.play()
+                paused.fulfill()
+            }
+        }
+        wait(for: [paused], timeout: 15)
+        let done = expectation(description: "break ended")
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            if pinger.trace.contains(where: { $0.hasSuffix(":podEnd") }) { done.fulfill() }
+        }
+        wait(for: [done], timeout: 40)
+        timer.invalidate()
+        let settle = expectation(description: "content resumes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { settle.fulfill() }
+        wait(for: [settle], timeout: 5)
+        _ = logger
+
+        let trace = pinger.trace, times = pinger.times
+        let start = try XCTUnwrap(trace.firstIndex { $0.hasSuffix(":podStart") }.map { times[$0] })
+        let end = try XCTUnwrap(trace.firstIndex { $0.hasSuffix(":podEnd") }.map { times[$0] })
+        // A little margin: the content's own events at the break's edges are what this is about.
+        let from = start.addingTimeInterval(-1).timeIntervalSince1970 * 1000
+        let to = end.addingTimeInterval(1).timeIntervalSince1970 * 1000
+        let during = capture.events.filter {
+            guard let ts = ($0["timestamp"] as? NSNumber)?.doubleValue else { return false }
+            return ts >= from && ts <= to
+        }.compactMap { $0["event"] as? String }
+        print("Content events around the break: \(during)")
+
+        XCTAssertFalse(during.contains("seeked"), "\(during)")
+        XCTAssertFalse(during.contains("seeking"), "\(during)")
+        XCTAssertFalse(during.contains("buffering"), "\(during)")
+        XCTAssertFalse(during.contains("buffered"), "\(during)")
+        XCTAssertEqual(during.filter { $0 == "paused" }.count, 1, "\(during)")
+        XCTAssertGreaterThanOrEqual(during.filter { $0 == "playing" }.count, 1, "\(during)")
+        XCTAssertEqual(during.firstIndex(of: "playing").map { $0 > during.firstIndex(of: "paused")! }, true, "\(during)")
     }
 }
