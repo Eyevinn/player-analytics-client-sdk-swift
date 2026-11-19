@@ -84,6 +84,12 @@ public final class AVPlayerEventLogger: NSObject {
     private let metadataOutput = AVPlayerItemMetadataOutput()
 
     // Heartbeat Timer (fires, for example, every 5 seconds)
+    /// Whether SGAI ad tracking is on for this session. Off unless enabled at init (#21).
+    public let isSGAIAdTrackingEnabled: Bool
+
+    /// Holds the per-ad SGAI tracking URLs (parsed from asset lists, or set by the app).
+    let sgaiTrackingUrls = SGAIAdTrackingUrlsExtractor()
+
     private var heartbeatTimer: Timer?
     private let heartbeatInterval: TimeInterval = 30.0
 
@@ -202,14 +208,19 @@ public final class AVPlayerEventLogger: NSObject {
     /// - Parameters:
     ///   - player: The AVPlayer whose events will be tracked.
     ///   - eventSinkUrl: A URL to your Player Analytics Event sink
-    public convenience init(player: AVPlayer, eventSinkUrl url: URL) {
-        self.init(player: player, logger: EventSinkPlayerLogger(endpoint: url))
+    ///   - enableSGAIAdTracking: Turn on SGAI (Server-Guided Ad Insertion) ad tracking.
+    ///     Off by default, so existing integrations behave exactly as before. Mirrors the
+    ///     Android SDK's `enableSGAIAdTracking(...)`. The ad events themselves are fired by
+    ///     the SGAI event tracking (issue #20); until that ships, enabling this has no effect.
+    public convenience init(player: AVPlayer, eventSinkUrl url: URL, enableSGAIAdTracking: Bool = false) {
+        self.init(player: player, logger: EventSinkPlayerLogger(endpoint: url), enableSGAIAdTracking: enableSGAIAdTracking)
     }
 
     /// Designated initializer; tests pass a capturing logger.
-    init(player: AVPlayer, logger: EventLogging) {
+    init(player: AVPlayer, logger: EventLogging, enableSGAIAdTracking: Bool = false) {
         self.player = player
         self.analytics = AnalyticsEventSender(logger: logger)
+        self.isSGAIAdTrackingEnabled = enableSGAIAdTracking
         super.init()
         // Log init event as soon as logger is created and also loading since we usually don't get that.
         // Metadata waits until the item is ready to play, when live/VOD is known (#41).
@@ -239,6 +250,29 @@ public final class AVPlayerEventLogger: NSObject {
     public func report(payload: [String: Any]?) {
         sendAnalytics(for: .metadata("Report: \(payload ?? [:])"))
         sendAnalytics(for: .report(payload))
+    }
+
+    // MARK: - SGAI ad tracking URLs
+
+    /// Sets the tracking URLs for one ad, replacing any URLs stored for that ad
+    /// (for example ones parsed from the asset list). Mirrors the Android SDK's
+    /// `setAdTrackingUrls(adKey, trackingMap)`.
+    ///
+    /// - Parameters:
+    ///   - trackingMap: URLs per ad event, keyed by the event name used in SGAI asset lists:
+    ///     `impression`, `start`, `firstQuartile`, `midpoint`, `thirdQuartile`, `complete`,
+    ///     `pause`, `resume`, `podStart`, `podEnd`. Events with no URLs are dropped; an empty
+    ///     map removes the ad's URLs.
+    ///   - adKey: The ad's key: `pod_<adBreakId>` for an ad break, or `<adsId>_0_<index>` for
+    ///     an ad within it, the same keys the Android SDK uses (e.g. `ad-session-1_0_0`).
+    public func setAdTrackingUrls(_ trackingMap: [String: [String]], forAd adKey: String) {
+        sgaiTrackingUrls.setTrackingUrls(trackingMap, forAd: adKey)
+    }
+
+    /// The tracking URLs stored for one ad, keyed by event name, or `nil` if there are none.
+    /// Mirrors the Android SDK's `getTrackingUrlsForAd(adKey)`.
+    public func trackingUrls(forAd adKey: String) -> [String: [String]]? {
+        sgaiTrackingUrls.trackingUrls(forAd: adKey)?.urlsByEvent
     }
     // MARK: - Setup Observers
 
