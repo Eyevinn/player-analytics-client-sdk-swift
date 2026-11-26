@@ -7,6 +7,9 @@ The Swift SDK uses the [Eyevinn Player Analytics Eventsink](https://app.osaas.io
 
 You can read more about Eyevinn Open Source Cloud [here](https://docs.osaas.io/osaas.wiki/Home.html).
 
+Where the data goes: [Open Analytics](https://analytics.apps.osaas.io/?utm_source=github&utm_medium=readme&utm_campaign=analytics&utm_content=sdk-swift) creates the whole pipeline (eventsink, worker, ClickHouse, Grafana) for you and shows startup time, rebuffering and failures per device and title;
+see the [live demo](https://analytics.apps.osaas.io/demo?utm_source=github&utm_medium=readme&utm_campaign=analytics&utm_content=sdk-swift). Use your pipeline's eventsink URL as `eventSinkUrl`.
+
 ----
 
 The easiest way to get started is to add the SDK to your project using the Swift Package Manager.
@@ -29,7 +32,7 @@ import VideoStreamTracker
 
 let logger = AVPlayerEventLogger(
     player: player,
-    eventSinkUrl: URL(string: "https://eventsink.osaas.io")!)
+    eventSinkUrl: URL(string: "https://YOUR-EVENTSINK-URL")!) // your pipeline's eventsink URL
 
 ...
 
@@ -53,7 +56,7 @@ SGAI (Server-Guided Ad Insertion) ad tracking is off by default. Turn it on when
 ```swift
 let logger = AVPlayerEventLogger(
     player: player,
-    eventSinkUrl: URL(string: "https://eventsink.osaas.io")!,
+    eventSinkUrl: URL(string: "https://YOUR-EVENTSINK-URL")!, // your pipeline's eventsink URL
     enableSGAIAdTracking: true)
 ```
 The SDK then follows the ad breaks AVPlayer plays as HLS interstitials (`#EXT-X-DATERANGE` with `CLASS="com.apple.hls.interstitial"` and `X-ASSET-LIST`), reads the tracking URLs from each break's asset list (`X-AD-CREATIVE-SIGNALING`), and calls them as the ads play:
@@ -81,7 +84,7 @@ Tell the SDK what is playing, so the dashboard can break numbers down by title:
 ```swift
 let logger = AVPlayerEventLogger(
     player: player,
-    eventSinkUrl: URL(string: "https://eventsink.osaas.io")!,
+    eventSinkUrl: URL(string: "https://YOUR-EVENTSINK-URL")!, // your pipeline's eventsink URL
     contentId: "vinn-1",
     contentTitle: "VINN")
 
